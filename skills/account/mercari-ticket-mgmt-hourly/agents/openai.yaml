@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mercari Ticket Mgmt"
+  short_description: "Mercari ticket triage and reply reporting"
+  default_prompt: "Use $mercari-ticket-mgmt to process one Mercari transaction-message batch and emit the greeting-only/reply report."

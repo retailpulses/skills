@@ -1,0 +1,17 @@
+{
+  "name": "pptx-skill-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned Node deps for the pptx skill. Do not import from app code.",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "pptxgenjs": "4.0.1",
+    "playwright": "1.59.1",
+    "sharp": "0.34.5",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-icons": "5.6.0"
+  }
+}

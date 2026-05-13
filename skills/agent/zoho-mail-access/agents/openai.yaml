@@ -1,0 +1,8 @@
+interface:
+  display_name: "Zoho Mail Access"
+  short_description: "Search Zoho Mail and capture matched messages"
+  default_prompt: "Use $zoho-mail-access to search Zoho Mail by subject or keywords and capture the matching message contents."
+
+policy:
+  allow_implicit_invocation: true
+

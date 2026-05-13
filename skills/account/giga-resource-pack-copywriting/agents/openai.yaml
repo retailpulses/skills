@@ -1,0 +1,7 @@
+interface:
+  display_name: "Giga Pack Copywriting"
+  short_description: "Generate marketplace copy from Giga Item Codes via Baserow."
+  default_prompt: "Use $giga-resource-pack-copywriting to resolve the Item Code, apply the active strategies, and write the platform copy to Baserow."
+
+policy:
+  allow_implicit_invocation: true

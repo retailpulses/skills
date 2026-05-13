@@ -1,0 +1,6 @@
+interface:
+  display_name: "GigaB2B API Access"
+  short_description: "Signed GigaB2B OpenAPI requests"
+  default_prompt: "Use $gigab2b-api-access to query GigaB2B product, price, saved-product, or shipping data with signed OpenAPI requests."
+policy:
+  allow_implicit_invocation: true

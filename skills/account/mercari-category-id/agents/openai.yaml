@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mercari Category ID"
+  short_description: "Write Mercari category IDs into Baserow Products from live master data."
+  default_prompt: "Use $mercari-category-id to inspect the live Baserow schema or CSV header, match Product Name against the category master, run a 100-row pilot if needed, and write Mercari category IDs back to Products or into an output CSV."

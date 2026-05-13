@@ -1,0 +1,154 @@
+{
+  "skills": [
+    {
+      "id": "27_accio-mcp-cli",
+      "name": "accio-mcp-cli",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "accio-mcp-cli",
+      "description": "Use the accio-mcp-cli command-line tool to discover, search, and invoke MCP tools (Twitter, Gmail, Notion, Square, Apify, etc.) directly from the terminal. Use when the user asks to call MCP tools via CLI, run accio-mcp-cli commands, list available MCP tools from the command line, or invoke remote service integrations from the shell instead of an in-app MCP gateway.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/accio-mcp-cli"
+    },
+    {
+      "id": "baserow-database-manager",
+      "name": "baserow-database-manager",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "baserow-database-manager",
+      "description": "Standalone Baserow API skill for reading data, writing records, creating tables, and modifying schema with resilient, token-saving operations.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/baserow-database-manager"
+    },
+    {
+      "id": "baserow-schema-editor",
+      "name": "baserow-schema-editor",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "baserow-schema-editor",
+      "description": "Edit Baserow schema for Retailpulses databases by adding, renaming, or deleting fields after reading live schema and using JWT-based schema access.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/baserow-schema-editor"
+    },
+    {
+      "id": "27_docx",
+      "name": "docx",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "docx",
+      "description": "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/docx"
+    },
+    {
+      "id": "27_gmail-assistant",
+      "name": "gmail-assistant",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "gmail-assistant",
+      "description": "Send, search, and manage Gmail messages with automatic delivery verification and smart draft workflow",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/gmail-assistant"
+    },
+    {
+      "id": "jp-payroll-assistant",
+      "name": "jp-payroll-assistant",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "jp-payroll-assistant",
+      "description": "Prepare monthly Japanese payroll slips (給与明細) in Baserow. This skill calculates working days (excluding weekends and Japanese public holidays), manages deductions for compliance, and creates records in the '給与明細' table. Use this skill whenever the user asks for \"payroll\", \"payslip\", \"給与明細\", or \"monthly salary calculation\".",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/jp-payroll-assistant"
+    },
+    {
+      "id": "mercari-settlement-pdf",
+      "name": "mercari-settlement-pdf",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "mercari-settlement-pdf",
+      "description": "Generate a Mercari settlement PDF (売上金精算書) for a given set of months, amounts, and a settlement number (INV-YYYY-MM). Use this skill when the user says \"开具精算书\", \"生成结算PDF\", or provides a list of monthly settlement amounts for \"合同会社リンセイ\".",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/mercari-settlement-pdf"
+    },
+    {
+      "id": "27_pdf",
+      "name": "pdf",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "pdf",
+      "description": "Comprehensive PDF manipulation toolkit for extracting text and tables, creating new PDFs, merging/splitting documents, and handling forms. When Claude needs to fill in a PDF form or programmatically process, generate, or analyze PDF documents at scale.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/pdf"
+    },
+    {
+      "id": "27_pptx",
+      "name": "pptx",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "pptx",
+      "description": "Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/pptx"
+    },
+    {
+      "id": "27_self-improvement",
+      "name": "self-improvement",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "self-improvement",
+      "description": "Captures learnings, errors, corrections, and self-reflections into daily diary for continuous improvement. Use when: (1) A command or operation fails unexpectedly, (2) User corrects you, (3) User requests a capability that doesn't exist, (4) An external API or tool fails, (5) Knowledge is outdated or incorrect, (6) A better approach is discovered, (7) You complete significant work and want to evaluate quality. Also review diary before major tasks.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/self-improvement"
+    },
+    {
+      "id": "27_skill-creator",
+      "name": "skill-creator",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "skill-creator",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/skill-creator"
+    },
+    {
+      "id": "27_skill-finder",
+      "name": "skill-finder",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "skill-finder",
+      "description": "Find, search, recommend, and install agent skills from the internal catalog, skills.sh, ClawHub, and SkillsMP — all in one place. Always consult this when user asks to find, search, discover, or choose skills. Use when user says \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", \"search all platforms\", \"best skill for X\", \"what skill should I use for X\", \"该用什么skill\", \"有没有XX的skill\", \"帮我找skill\", \"推荐一个skill\", or expresses interest in extending capabilities or choosing the right skill for a task.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/skill-finder"
+    },
+    {
+      "id": "27_xlsx",
+      "name": "xlsx",
+      "version": "0.0.55",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "xlsx",
+      "description": "Comprehensive spreadsheet creation, editing, and analysis with support for formulas, formatting, data analysis, and visualization. When working with spreadsheets (.xlsx, .xlsm, .csv, .tsv, etc) for: (1) Creating new spreadsheets with formulas and formatting, (2) Reading or analyzing data, (3) Modify existing spreadsheets while preserving formulas, (4) Data analysis and visualization in spreadsheets, or (5) Recalculating formulas",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/xlsx"
+    },
+    {
+      "id": "zoho-mail-access",
+      "name": "zoho-mail-access",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "zoho-mail-access",
+      "description": "Standalone Zoho Mail access skill for refreshing local OAuth credentials, searching messages by subject or keywords, and capturing matched message contents from this workspace.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/zoho-mail-access"
+    },
+    {
+      "id": "zoho-mail-handler",
+      "name": "zoho-mail-handler",
+      "version": "",
+      "enabled": true,
+      "kind": "directory",
+      "entryName": "zoho-mail-handler",
+      "description": "Use for Zoho Mail REST API work: search emails by keyword/topic/sender and summarize results, fetch email content by messageId, and draft/preview/send replies to a specific email via the Zoho Mail reply endpoint.",
+      "installPath": "/Users/user/.accio/accounts/7085446805/agents/DID-F456DA-2B0D4C/agent-core/skills/zoho-mail-handler"
+    }
+  ]
+}

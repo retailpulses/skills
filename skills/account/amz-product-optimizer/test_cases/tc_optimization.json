@@ -1,0 +1,201 @@
+[
+  {
+    "id": "TC-001",
+    "name": "商品名优化 - 移除 Hot Search 标签",
+    "description": "验证优化后的商品名不包含'Hot Search'等标记词",
+    "input": {
+      "original_name": "Blue Buffalo Tastefuls Flaked Wet Cat Food",
+      "keyword": "cat food"
+    },
+    "expected_output": {
+      "contains_hot_search": false,
+      "contains_brand": true,
+      "is_readable": true,
+      "follows_structure": true
+    },
+    "assertions": [
+      "optimized_name NOT CONTAINS 'Hot Search'",
+      "optimized_name NOT CONTAINS 'Keyword Stuffing'",
+      "optimized_name CONTAINS brand name",
+      "optimized_name LENGTH > original_name LENGTH",
+      "optimized_name is readable sentence"
+    ]
+  },
+  {
+    "id": "TC-002",
+    "name": "商品名结构验证",
+    "description": "验证优化后的商品名遵循 [品牌名]+[核心关键词]+[产品特性]+[规格] 结构",
+    "input": {
+      "original_name": "Purina Friskies Wet Cat Food Variety Pack",
+      "keyword": "wet cat food"
+    },
+    "expected_output": {
+      "has_brand": true,
+      "has_core_keyword": true,
+      "has_features": true,
+      "has_specification": true
+    },
+    "assertions": [
+      "optimized_name STARTS WITH brand name",
+      "optimized_name CONTAINS core keyword 'Wet Cat Food'",
+      "optimized_name CONTAINS product features",
+      "optimized_name CONTAINS specification (size/pack)"
+    ]
+  },
+  {
+    "id": "TC-003",
+    "name": "热搜词获取",
+    "description": "验证能从 AMZ123 成功获取热搜词数据",
+    "input": {
+      "keyword": "cat food"
+    },
+    "expected_output": {
+      "min_keywords": 10,
+      "has_ranking": true,
+      "has_trend": true
+    },
+    "assertions": [
+      "keywords COUNT >= 10",
+      "each keyword HAS currentRank",
+      "each keyword HAS lastRank",
+      "each keyword HAS trend (上升/下降/持平)"
+    ]
+  },
+  {
+    "id": "TC-004",
+    "name": "详情图生成数量",
+    "description": "验证为每个商品生成 5 张详情图",
+    "input": {
+      "product_count": 2,
+      "mode": "full"
+    },
+    "expected_output": {
+      "total_images": 10,
+      "images_per_product": 5
+    },
+    "assertions": [
+      "generated_images COUNT == product_count * 5",
+      "each product HAS main_image",
+      "each product HAS detail_image_1 to detail_image_5"
+    ]
+  },
+  {
+    "id": "TC-005",
+    "name": "详情图场景差异",
+    "description": "验证生成的 5 张图片具有不同的场景化 prompt",
+    "input": {
+      "product_name": "Blue Buffalo Cat Food"
+    },
+    "expected_output": {
+      "scene_diversity": true,
+      "has_living_room": true,
+      "has_bedroom": true,
+      "has_detail_shot": true,
+      "has_pet_usage": true
+    },
+    "assertions": [
+      "prompt_1 CONTAINS 'living room'",
+      "prompt_2 CONTAINS 'bedroom'",
+      "prompt_3 CONTAINS 'detail' OR 'close-up'",
+      "prompt_4 CONTAINS 'pet' OR 'happy'",
+      "all prompts are DIFFERENT"
+    ]
+  },
+  {
+    "id": "TC-006",
+    "name": "主图选择策略",
+    "description": "验证主图选择整体场景图而非细节特写",
+    "input": {
+      "images": ["scene_1", "detail_shot", "bedroom", "pet_usage", "reading_corner"]
+    },
+    "expected_output": {
+      "main_image": "scene_1"
+    },
+    "assertions": [
+      "main_image IS scene_1 OR bedroom",
+      "main_image NOT IS detail_shot",
+      "main_image SHOWS overall product"
+    ]
+  },
+  {
+    "id": "TC-007",
+    "name": "本地文件写入",
+    "description": "验证优化结果正确写入本地 JSON 文件",
+    "input": {
+      "product_file": "test_products.json",
+      "optimized_name": "Test Product Name",
+      "images": ["url1", "url2", "url3", "url4", "url5"]
+    },
+    "expected_output": {
+      "file_exists": true,
+      "products_count": 1
+    },
+    "assertions": [
+      "file 'test_products.json' EXISTS",
+      "file CONTAINS optimized_name",
+      "file CONTAINS main_image",
+      "file CONTAINS detail_images"
+    ]
+  },
+  {
+    "id": "TC-008",
+    "name": "点击率监控阈值",
+    "description": "验证点击率监控正确识别需优化的商品",
+    "input": {
+      "products": [
+        {"name": "Product A", "click_rate": "3.2%"},
+        {"name": "Product B", "click_rate": "6.5%"},
+        {"name": "Product C", "click_rate": "4.8%"}
+      ]
+    },
+    "expected_output": {
+      "need_optimization": 2,
+      "good_performance": 1
+    },
+    "assertions": [
+      "products with click_rate < 5% MARKED as need_optimization",
+      "products with click_rate >= 5% MARKED as good_performance",
+      "report CONTAINS correct counts"
+    ]
+  },
+  {
+    "id": "TC-009",
+    "name": "执行模式切换",
+    "description": "验证不同执行模式正确执行对应步骤",
+    "input": {
+      "modes": ["full", "keywords_only", "optimize_names", "generate_images", "monitor"]
+    },
+    "expected_output": {
+      "full_executes_all_steps": true,
+      "keywords_only_fetches_keywords": true,
+      "optimize_names_only_optimizes": true,
+      "generate_images_only_generates": true,
+      "monitor_only_checks_click_rate": true
+    },
+    "assertions": [
+      "mode 'full' EXECUTES all 4 steps",
+      "mode 'keywords_only' EXECUTES ONLY fetch_keywords",
+      "mode 'optimize_names' EXECUTES ONLY optimize_names",
+      "mode 'generate_images' EXECUTES ONLY generate_images",
+      "mode 'monitor' EXECUTES ONLY monitor_click_rate"
+    ]
+  },
+  {
+    "id": "TC-010",
+    "name": "错误处理",
+    "description": "验证遇到错误时正确返回错误信息",
+    "input": {
+      "invalid_file": "/non_existent/path/file.json",
+      "invalid_keyword": "xyz123notexist"
+    },
+    "expected_output": {
+      "status": "error",
+      "has_error_message": true
+    },
+    "assertions": [
+      "result status IS 'error'",
+      "result CONTAINS error message",
+      "error message is DESCRIPTIVE"
+    ]
+  }
+]

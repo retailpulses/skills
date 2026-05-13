@@ -1,0 +1,4 @@
+interface:
+  display_name: "Amazon Inventory Flatfile"
+  short_description: "Sync Amazon inventory and build upload flat files"
+  default_prompt: "Use $amazon-inventory-flatfile to sync Amazon listings inventory, build a valid upload flat file, and summarize any processing summary."

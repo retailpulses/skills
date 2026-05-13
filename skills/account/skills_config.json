@@ -1,0 +1,74 @@
+{
+  "27_1688-sourcing": {
+    "installedVersion": "0.0.54"
+  },
+  "27_cross-border-selection": {
+    "installedVersion": "0.0.54"
+  },
+  "27_copywriting": {
+    "installedVersion": "0.0.54"
+  },
+  "27_find-skills": {
+    "installedVersion": "0.0.48"
+  },
+  "27_skill-writer": {
+    "installedVersion": "0.0.48"
+  },
+  "baserow-database-manager": {
+    "enabled": true
+  },
+  "baserow-schema-editor": {
+    "enabled": true
+  },
+  "amazon-inventory-flatfile": {
+    "enabled": true
+  },
+  "giga-resource-pack-copywriting": {
+    "enabled": true
+  },
+  "gigab2b-api-access": {
+    "enabled": true
+  },
+  "invoice-receipt-automation": {
+    "enabled": true
+  },
+  "mercari-category-id": {
+    "enabled": true
+  },
+  "mercari-listing": {
+    "enabled": true
+  },
+  "mercari-shop-api-specialist": {
+    "enabled": true
+  },
+  "mercari-ticket-mgmt": {
+    "enabled": true
+  },
+  "mercari-timesale-csv": {
+    "enabled": true
+  },
+  "sync-giga-saved-products": {
+    "enabled": true
+  },
+  "find-skills": {
+    "enabled": true
+  },
+  "skill-writer": {
+    "enabled": true
+  },
+  "27_higgsfield-guide": {
+    "installedVersion": "0.0.54"
+  },
+  "27_amazon-listing-expert": {
+    "installedVersion": "0.0.54"
+  },
+  "27_seo-keyword-research": {
+    "installedVersion": "0.0.54"
+  },
+  "27_amz-product-optimizer": {
+    "installedVersion": "0.0.54"
+  },
+  "27_ab-test-setup": {
+    "installedVersion": "0.0.54"
+  }
+}
