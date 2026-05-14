@@ -281,6 +281,7 @@ def graphql_direct(token: str, user_agent: str, query: str, variables: Optional[
         return json.loads(resp.read().decode())
 
 
+# VPS connection details: see skills/account/mercari-shop-api-specialist/references/vps-connection.md
 def graphql_via_ssh(
     host: str,
     ssh_key: str,

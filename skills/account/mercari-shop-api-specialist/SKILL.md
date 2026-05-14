@@ -9,14 +9,9 @@ Use this skill for Mercari Shops API work that must execute from the Conoha VPS 
 
 ## Operating Model
 
-- Production Mercari work runs from the Conoha VPS fixed IPv4 path `160.251.141.110`.
-- SSH defaults:
-  - host: `root@160.251.141.110`
-  - key: `~/.ssh/id_ed25519`
-  - canonical command: `ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@160.251.141.110`
-- Force IPv4 for all production Mercari requests.
+Connection defaults (SSH, egress IP, User-Agent, API base URL) are documented in [references/vps-connection.md](references/vps-connection.md).
+
 - Keep tokens in environment variables only.
-- Use `User-Agent: Inhouse_ERP/<VERSION>`.
 - Production and sandbox are separate.
 - If sandbox returns `401`, treat it as token or environment mismatch first.
 - Start with read-only queries before writes.
@@ -46,19 +41,11 @@ Use this skill when the user asks for:
 
 ### Egress Check
 
-```bash
-curl -4 -fsS https://ifconfig.me
-```
-
-Expected output:
-
-```text
-160.251.141.110
-```
+See [references/vps-connection.md](references/vps-connection.md) for the egress verification command and expected IP.
 
 ### Production Smoke Test
 
-Run this from the VPS:
+Run this from the VPS (see [references/vps-connection.md](references/vps-connection.md) for SSH connection details):
 
 ```bash
 curl -4 -sS \
@@ -67,22 +54,6 @@ curl -4 -sS \
   -H 'Content-Type: application/json' \
   -H "User-Agent: ${MERCARI_API_CLIENT_NAME}/${MERCARI_API_CLIENT_VERSION}" \
   --data '{"query":"query shop { shop { id name businessKind } }"}'
-```
-
-If you need the full SSH path from the local machine:
-
-```bash
-ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no root@160.251.141.110 \
-  "export MERCARI_ACCESS_TOKEN='...'; \
-   export MERCARI_API_CLIENT_NAME='Inhouse_ERP'; \
-   export MERCARI_API_CLIENT_VERSION='0.0.1'; \
-   curl -4 -fsS https://ifconfig.me; \
-   curl -4 -sS \
-     -X POST 'https://api.mercari-shops.com/v1/graphql' \
-     -H \"Authorization: Bearer \$MERCARI_ACCESS_TOKEN\" \
-     -H 'Content-Type: application/json' \
-     -H \"User-Agent: \$MERCARI_API_CLIENT_NAME/\$MERCARI_API_CLIENT_VERSION\" \
-     --data '{\"query\":\"query shop { shop { id name businessKind } }\"}'"
 ```
 
 ### SKU Existence Check
@@ -144,6 +115,5 @@ curl -4 -sS \
 ## Useful Defaults
 
 - `MERCARI_API_CLIENT_NAME=Inhouse_ERP`
-- `MERCARI_EXPECTED_EGRESS_IP=160.251.141.110`
-- `MERCARI_SSH_KEY=~/.ssh/id_ed25519`
+- SSH, egress, and connection defaults: see [references/vps-connection.md](references/vps-connection.md)
 
