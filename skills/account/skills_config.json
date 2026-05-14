@@ -27,6 +27,9 @@
     "enabled": true
   },
   "gigab2b-api-access": {
+    "enabled": false
+  },
+  "gigab2b-workflow": {
     "enabled": true
   },
   "invoice-receipt-automation": {
@@ -48,7 +51,7 @@
     "enabled": true
   },
   "sync-giga-saved-products": {
-    "enabled": true
+    "enabled": false
   },
   "find-skills": {
     "enabled": true

@@ -330,7 +330,8 @@ def main() -> None:
     skill_dir = os.path.dirname(script_dir)
     load_dotenv(os.path.join(skill_dir, ".env"))
     load_dotenv(os.path.join(skill_dir, ".env.local"))
-    load_dotenv("/Users/user/.codex/skills/mercari-csv-listing/.env")
+    env_path = os.environ.get("MERCARI_ENV_PATH", "/Users/user/.codex/skills/mercari-csv-listing/.env")
+    load_dotenv(env_path)
     load_dotenv("/Users/user/.codex/skills/mercari-csv-listing/.env.local")
 
     token = resolve_token(args.token)
