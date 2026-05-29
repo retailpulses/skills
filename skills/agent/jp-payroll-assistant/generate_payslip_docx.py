@@ -7,27 +7,37 @@ from docx.oxml.ns import qn
 def create_payslip_docx(payload, month_label, output_path):
     doc = Document()
     
-    # Set Japanese font (MS Mincho or similar)
+    # Set Japanese font and 12pt default size
     style = doc.styles['Normal']
     font = style.font
     font.name = 'MS Mincho'
-    font.size = Pt(10)
+    font.size = Pt(12)
     style.element.rPr.rFonts.set(qn('w:eastAsia'), 'MS Mincho')
+
+    # Company Header (Right aligned)
+    company_info = doc.add_paragraph()
+    company_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run = company_info.add_run("Retailpulses GK（リテルパルス合同会社）\n")
+    run.bold = True
+    company_info.add_run("〒124-0014 東京都葛飾区四つ木2丁目20番4号 202号室")
 
     # Title
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title.add_run(f"給与明細書 ({month_label})")
     run.bold = True
-    run.size = Pt(16)
+    run.size = Pt(18)
 
-    # Employee Name and Date
-    header = doc.add_table(rows=1, cols=2)
-    header.width = Inches(6)
+    # Employee Name and Date/Working Days
+    # Using a 3-column table for Name, Date, and Days
+    header = doc.add_table(rows=1, cols=3)
+    header.width = Inches(6.5)
     cells = header.rows[0].cells
     cells[0].text = f"氏名: {payload['従業員名']} 様"
-    cells[1].text = f"支給日: {payload['給与月']}"
-    cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    cells[1].text = f"出勤日数: {payload.get('勤務日数', 0)} 日"
+    cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cells[2].text = f"支給日: {payload['給与月']}"
+    cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     doc.add_paragraph()
 
@@ -94,22 +104,3 @@ def create_payslip_docx(payload, month_label, output_path):
 
     doc.save(output_path)
     return output_path
-
-if __name__ == "__main__":
-    # Test
-    sample_payload = {
-        "従業員名": "楊　永亮",
-        "給与月": "2026-05-31",
-        "基本給": 400000,
-        "その他手当": 0,
-        "健康保険料": 20664,
-        "厚生年金保険料": 37515,
-        "雇用保険料": 0,
-        "所得税": 10750,
-        "住民税": 0,
-        "実支給額": 331000,
-        "振込方法": "銀行振り込み",
-        "Notes": "差引支給額と実支給額（固定振込額）との差額については、12月の年末調整時または退職時に一括して精算するものとします。"
-    }
-    create_payslip_docx(sample_payload, "2026年5月", "test_payslip.docx")
-    print("Test docx created.")
