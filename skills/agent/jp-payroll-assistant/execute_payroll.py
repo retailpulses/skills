@@ -44,7 +44,7 @@ def count_work_days(year, month):
 
 def run_payroll(year, month, token, output_dir=None):
     if output_dir is None:
-        output_dir = f"/Users/user/Documents/Retailpulses/{year} payroll"
+        output_dir = "/Users/user/Documents/Retailpulses/10_COMPANY/庶務関係"
     
     try:
         from generate_payslip_docx import create_payslip_docx
