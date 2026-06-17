@@ -191,10 +191,10 @@ def apply_title_prefix(base_title: str, product_row: dict) -> str:
     if unit_price and target and unit_price > 0:
         discount_pct = (unit_price - target) / unit_price * 100
         if discount_pct > 10:
-            prefixes.append("数量限定セール")
+            prefixes.append("『数量限定セール』")
     rd = parse_date(product_row.get("Restock date"))
     if rd and rd > dt.date.today():
-        prefixes.append(rd.strftime("%m/%d") + "再入荷予定")
+        prefixes.append("『" + rd.strftime("%m/%d") + "再入荷予定』")
     if prefixes:
         title = " ".join(prefixes + [title]).strip()
     if len(title) > 130:
@@ -516,6 +516,7 @@ def compute_score(
     spec_text: str,
     n_valid_images: int,
     unit_fulfillment_fees: Optional[float] = None,
+    min_image_count: int = 5,
 ) -> dict:
     gates: List[str] = []
     modules: Dict[str, int] = {}
@@ -530,7 +531,7 @@ def compute_score(
         gates.append("BLOCKED:description_too_long")
     if n_valid_images == 0:
         gates.append("BLOCKED:no_images")
-    if n_valid_images < 8:
+    if n_valid_images < min_image_count:
         gates.append("BLOCKED:insufficient_images")
     if not price_val or price_val == 0:
         gates.append("BLOCKED:no_price")
@@ -660,7 +661,7 @@ def main() -> None:
     parser.add_argument("--auto-open-qualified", action="store_true", help="Set 商品ステータス=2 for score >= 80 (requires --score)")
     parser.add_argument("--baserow-workers", type=int, default=10, help="Number of parallel Baserow read workers (default: 10)")
     parser.add_argument("--dry-run", action="store_true", help="Preview exclusions without writing CSV")
-    parser.add_argument("--min-image-count", type=int, default=8, help="Minimum image count threshold (default: 8)")
+    parser.add_argument("--min-image-count", type=int, default=5, help="Minimum image count threshold (default: 5)")
     parser.add_argument("--use-deepseek-desc", action="store_true", help="Use DeepSeek LLM for full spec translation (requires DEEPSEEK_API_KEY)")
     parser.add_argument("--deepseek-api-key", default=None, help="DeepSeek API key (default: DEEPSEEK_API_KEY env var)")
     args = parser.parse_args()
@@ -810,6 +811,9 @@ def main() -> None:
             missing_main_color.append(code)
 
         category = str_value(prod.get("Mercari category ID"))
+        # Fallback: if category not resolved, use 住宅設備 > その他
+        if not category:
+            category = "DkjqZAKBXaZN8FB2Kb6zhX"
         set_if_exists(row, "カテゴリID", category)
 
         set_if_exists(row, "商品の状態", "1")
@@ -849,6 +853,7 @@ def main() -> None:
                 spec_text=str_value(prod.get("Product Specification")),
                 n_valid_images=n_valid_images,
                 unit_fulfillment_fees=fulfillment_fees,
+                min_image_count=args.min_image_count,
             )
             score_records.append({"item_code": code, **score})
             if args.auto_open_qualified and score["auto_open"]:

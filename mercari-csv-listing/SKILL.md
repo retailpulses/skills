@@ -81,8 +81,8 @@ Source: 886994.`Product Name`.
 
 1. Strip `元SKU` / `元sku` / `元SKU：` patterns from anywhere in the title.
 2. Strip leading ASCII SKU codes: `re.sub(r"^[A-Z0-9-]+\s*", "", title)`.
-3. Prepend `数量限定セール` if discount > 10% (`Discounted Unit Price` vs `Unit Price`).
-4. Prepend `MM/DD再入荷予定` if `Restock date` is in the future.
+3. Prepend `『数量限定セール』` if discount > 10% (`Discounted Unit Price` vs `Unit Price`).
+4. Prepend `『MM/DD再入荷予定』` if `Restock date` is in the future.
 5. Cap at 130 chars via hard truncation.
 
 ## Description Rules
@@ -146,7 +146,7 @@ Spec translation applies in two stages:
 | `SKU1_種類` | 886994.`Representative_Color_JA` | Validated via `is_usable_main_color()`; falls back to Main Color via `prepare_colors.py` |
 | `SKU1_在庫数` | 886994.`Mercari Qty` | Direct |
 | `SKU1_現在の在庫数` | 886994.`Mercari Qty` | Same |
-| `カテゴリID` | 886994.`Mercari category ID` | Direct from Baserow; blank if empty |
+| `カテゴリID` | 886994.`Mercari category ID` | Direct from Baserow; falls back to `DkjqZAKBXaZN8FB2Kb6zhX` (DIY・工具 > 住宅設備 > その他) if empty |
 | `送料ID` | — | Blank (seller-paid) |
 | `発送までの日数` | 886994.`Inventory Status` | `"3"` if `Incoming Stock` (or `More On The Way > 0` or `Estimated Next Arrival Date` set); otherwise `"1"` |
 | `商品の状態` | Fixed | `"1"` |
@@ -176,14 +176,14 @@ Excluded items are reported in the JSON output under `excluded_by_gates`.
 |------|-----------|-------------|
 | `no_unit_price` | `Unit Price` is null or 0 | 886994.`Unit Price` |
 | `no_fulfillment_fees` | `Unit Fulfillment Fees (Drop Shipping)` is null | 886994.`Unit Fulfillment Fees (Drop Shipping)` |
-| `insufficient_images` | Available images < `--min-image-count` (default 8) | 886994.`Image URLs JSON` + GigaB2B API fallback |
+| `insufficient_images` | Available images < `--min-image-count` (default 5) | 886994.`Image URLs JSON` + GigaB2B API fallback |
 
 ## CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--dry-run` | off | Preview exclusions and counts without writing CSV |
-| `--min-image-count` | 8 | Minimum required images for a row to be included |
+| `--min-image-count` | 5 | Minimum required images for a row to be included |
 | `--use-deepseek-desc` | off | Use DeepSeek LLM for full spec translation (requires `DEEPSEEK_API_KEY`) |
 | `--deepseek-api-key` | env var | DeepSeek API key (checked: `DEEPSEEK_API_KEY` or `Deepseek_API_KEY`) |
 
@@ -296,7 +296,7 @@ If any gate is triggered, score = 0 and `商品ステータス` = `"1"` regardle
 | `BLOCKED:no_title` | Title empty or > 130 chars |
 | `BLOCKED:no_description` | Description empty or > 3000 chars |
 | `BLOCKED:no_images` | 0 valid images |
-| `BLOCKED:insufficient_images` | Valid images < 8 |
+| `BLOCKED:insufficient_images` | Valid images < `--min-image-count` (default 5) |
 | `BLOCKED:no_price` | Price = 0 or empty |
 | `BLOCKED:no_unit_price` | `Unit Price` is null or 0 |
 | `BLOCKED:no_fulfillment_fees` | `Unit Fulfillment Fees (Drop Shipping)` is null |
