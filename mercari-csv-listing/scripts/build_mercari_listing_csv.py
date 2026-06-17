@@ -176,6 +176,8 @@ def parse_date(v) -> Optional[dt.date]:
 
 
 def apply_title_prefix(base_title: str, product_row: dict) -> str:
+    # Strip HTML tags and comments (e.g. <!-利用不可文字-!>)
+    base_title = mercari_text_utils.strip_html(base_title)
     # Strip 元SKU patterns from anywhere in the title
     base_title = re.sub(
         r"(?:set\s+)?(?:【)?元[Ss][Kk][Uu](?:[：:]|\s+)[A-Z0-9-]+(?:】)?\s*",
@@ -539,6 +541,12 @@ def compute_score(
         gates.append("BLOCKED:no_unit_price")
     if unit_fulfillment_fees is None:
         gates.append("BLOCKED:no_fulfillment_fees")
+    # Gate: hollow spec — mostly "Not Applicable" filler with no real content
+    spec_body = spec_text or ""
+    spec_lines = [l.strip() for l in spec_body.split("\n") if l.strip()]
+    meaningful = [l for l in spec_lines if "Not Applicable" not in l and not re.match(r"^[A-Z0-9-]+$", l)]
+    if spec_lines and len(meaningful) <= 2:
+        gates.append("BLOCKED:hollow_spec")
 
     title_len = len(title) if title else 0
     if not title or title_len == 0:

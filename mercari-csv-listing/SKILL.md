@@ -300,6 +300,7 @@ If any gate is triggered, score = 0 and `商品ステータス` = `"1"` regardle
 | `BLOCKED:no_price` | Price = 0 or empty |
 | `BLOCKED:no_unit_price` | `Unit Price` is null or 0 |
 | `BLOCKED:no_fulfillment_fees` | `Unit Fulfillment Fees (Drop Shipping)` is null |
+| `BLOCKED:hollow_spec` | Product Specification has ≤ 2 meaningful lines (mostly "Not Applicable" filler) |
 
 ## Missing Products Report
 
