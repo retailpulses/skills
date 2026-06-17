@@ -9,26 +9,61 @@ Use when the input is Item Codes or a GigaB2B Excel file and the output is a Mer
 
 **Listing strategy**: Seller-paid shipping (shipping included in listed price). All data from Baserow table 886994 (Products).
 
-## Workflow
+## Pipeline
 
-1. Deduplicate item codes or parse Excel.
-2. Check each Item Code against Baserow 886994. Skip missing codes; at the end, output `missing_products_YYYY-MM-DD.csv`.
-3. **Hard gates** — exclude rows that fail any of:
-   - `Unit Price` is null or 0
-   - `Unit Fulfillment Fees (Drop Shipping)` is null
-   - Available images count < `--min-image-count` (default: 8)
-4. Resolve image URLs from 886994.`Image URLs JSON`. If empty, fetch from GigaB2B API and backfill.
-5. Generate title from 886994.`Product Name` (SKU-strip, prefixes, hard trim at 130).
-6. Generate description from 886994.`Product Specification` + prefix boilerplate.
-7. Score listing quality (10-module, 100-point rubric). If score >= 80 and no blocking gates → `商品ステータス = "2"` (OPENED). Otherwise `"1"` (UNOPENED).
-8. Assemble one CSV row per surviving Item Code.
-9. User uploads CSV manually via Mercari admin panel (CSV一括機能).
+Each key field domain has its own preparation script. The build script is a final CSV assembler that reads already-clean data from Baserow.
+
+```
+Step 1: prepare_categories.py
+  ├─ Reads product names → keyword-matches category IDs
+  ├─ Maps Shops-invalid leaf categories → "その他" variants
+  ├─ Writes → Baserow.Mercari category ID
+  ↓
+Step 2: prepare_colors.py
+  ├─ Falls back: Representative_Color_JA empty? → use Main Color → EN→JA translation
+  ├─ Writes → Baserow.Representative_Color_JA
+  ↓
+Step 3: prepare_oversize_images.py
+  ├─ Reads Image URLs JSON from Baserow
+  ├─ HEAD-checks each URL, downloads >10MB images
+  ├─ Resizes to 1500x1500 progressive JPEG, uploads to R2
+  ├─ Writes updated R2 URLs → Baserow.Image URLs JSON
+  ↓
+Step 4: build_mercari_listing_csv.py
+  ├─ Reads clean Baserow data → assembles CSV
+  ├─ Applies titles, descriptions, scoring
+  ↓
+Step 5: upload_mercari_csv_to_shops.py
+  └─ Uploads CSV to Mercari Shops via SSH
+```
+
+## Workflow (execution order)
+
+1. **Prepare categories** — `python3 scripts/prepare_categories.py --item-codes <file> --token <token> [--dry-run]`
+   - Matches product names to Mercari Shops category IDs via keyword rules
+   - Falls back to "その他" for 7 known Shops-invalid leaf categories
+   - Writes `Mercari category ID` to Baserow
+2. **Prepare colors** — `python3 scripts/prepare_colors.py --item-codes <file> --token <token> [--dry-run]`
+   - Translates `Main Color` (English) → `Representative_Color_JA` (Japanese) for products missing it
+   - Uses static EN→JA dict (32 entries) with compound color support (`white+black → ホワイト+ブラック`)
+3. **Prepare images** — `python3 scripts/prepare_oversize_images_for_mercari.py --item-codes <file> --r2-public-base-url <url> --token <token> [--dry-run]`
+   - Reads `Image URLs JSON` from Baserow, HEAD-checks each URL
+   - Downloads oversized images (>10MB), resizes to 1500×1500 progressive JPEG
+   - Uploads to R2 bucket `resize-product-images`, writes R2 URLs back to `Image URLs JSON`
+4. **Build CSV** — `python3 scripts/build_mercari_listing_csv.py --item-codes <file> --template-csv <template> --shipping-guide-url <url> --token <token> [--score]`
+   - Reads clean Baserow data, assembles CSV rows, applies scoring
+5. **Upload to Shops** — `python3 scripts/upload_mercari_csv_to_shops.py --csv <output.csv> [--shops shop4] [--mode ssh]`
+    - Uploads CSV to Mercari Shops via SSH/VPS
+
+## Hard Gates (build step)
 
 ## Prerequisites
 
 - `BASEROW_TOKEN` in env or `.env`.
 - `GIGA_CLIENT_ID` and `GIGA_CLIENT_SECRET` for GigaB2B image fetching.
+- `R2_PUBLIC_BASE_URL` and `wrangler` CLI for image resize/upload.
 - Shipping-fee guide image URL.
+- `DEEPSEEK_API_KEY` (optional, for `--use-deepseek-desc`).
 
 ## Data Source
 
@@ -44,10 +79,11 @@ Single table: **886994** (Products). No other Baserow tables are used.
 
 Source: 886994.`Product Name`.
 
-1. Strip SKU prefix: `re.sub(r"^[A-Z0-9-]+\s*", "", title)`.
-2. Prepend `数量限定セール` if discount > 10% (`Discounted Unit Price` vs `Unit Price`).
-3. Prepend `MM/DD再入荷予定` if `Restock date` is in the future.
-4. Cap at 130 chars via hard truncation.
+1. Strip `元SKU` / `元sku` / `元SKU：` patterns from anywhere in the title.
+2. Strip leading ASCII SKU codes: `re.sub(r"^[A-Z0-9-]+\s*", "", title)`.
+3. Prepend `数量限定セール` if discount > 10% (`Discounted Unit Price` vs `Unit Price`).
+4. Prepend `MM/DD再入荷予定` if `Restock date` is in the future.
+5. Cap at 130 chars via hard truncation.
 
 ## Description Rules
 
@@ -81,6 +117,24 @@ Spec translation applies in two stages:
 
 **Footer**: `--description-footer` (default empty).
 
+## Category Rules
+
+**Prepare step**: `prepare_categories.py` keyword-matches product names to Mercari Shops category IDs from a master CSV (2,427 categories). After matching, 7 known Shops-invalid leaf categories are auto-replaced with their parent "その他" (Other) variant:
+
+| Invalid Shops leaf | Replacement |
+|---|---|
+| スポーツ > マリンスポーツ > サーフィン・ボディボード | スポーツ > マリンスポーツ > その他 |
+| ペット用品 > 猫用品 > ベッド・クッション・ハウス | ペット用品 > 猫用品 > その他 |
+| フラワー・ガーデニング > 園芸用品 > ガーデンファニチャー | フラワー・ガーデニング > 園芸用品 > その他 |
+| ゲーム・おもちゃ・グッズ > おもちゃ > 大型遊具・室内遊具 | ゲーム・おもちゃ・グッズ > おもちゃ > その他 |
+| DIY・工具 > 住宅設備 > 物置・車庫 | DIY・工具 > 住宅設備 > その他 |
+| 家具・インテリア > ベッド・マットレス > マットレス | 家具・インテリア > ベッド・マットレス > その他 |
+| 家具・インテリア > 寝具 > 布団・毛布 | 家具・インテリア > 寝具 > その他 |
+
+## Color Rules
+
+**Prepare step**: `prepare_colors.py` translates `Main Color` (English) → `Representative_Color_JA` (Japanese) for products missing the Japanese color name. Uses a static EN→JA dictionary (32 entries). Compound colors like `white+black` are split and translated as `ホワイト+ブラック`.
+
 ## Field Rules
 
 | CSV Column | Source | Rule |
@@ -89,7 +143,7 @@ Spec translation applies in two stages:
 | `商品説明` | 886994.`Product Specification` | Prefix + `【商品説明】` + content + footer |
 | `販売価格` | 886994.`Mercari Effective Pricing (incl. shipping)` | Direct value |
 | `SKU1_商品管理コード` | Item Code | Direct |
-| `SKU1_種類` | 886994.`Representative_Color_JA` | Validated via `is_usable_main_color()`; blank if invalid |
+| `SKU1_種類` | 886994.`Representative_Color_JA` | Validated via `is_usable_main_color()`; falls back to Main Color via `prepare_colors.py` |
 | `SKU1_在庫数` | 886994.`Mercari Qty` | Direct |
 | `SKU1_現在の在庫数` | 886994.`Mercari Qty` | Same |
 | `カテゴリID` | 886994.`Mercari category ID` | Direct from Baserow; blank if empty |
@@ -103,7 +157,9 @@ Spec translation applies in two stages:
 
 ## Image Rules
 
-Source: 886994.`Image URLs JSON` (JSON array). If empty, call GigaB2B API → write back → continue.
+**Prepare step** (run before build): `prepare_oversize_images_for_mercari.py` resizes images >10MB to 1500×1500 progressive JPEG, uploads to R2, and writes R2 URLs back to `Image URLs JSON`.
+
+**Build step** source: 886994.`Image URLs JSON` (JSON array). If empty, call GigaB2B API → write back → continue.
 
 Assembly (columns `商品画像名_1` to `商品画像名_20`):
 - Fill slots 1–20 sequentially from the image URL list.
@@ -258,6 +314,14 @@ For input Item Codes not found in Baserow 886994:
 - Encoding: `utf-8-sig` (BOM)
 - Preserve all template columns; leave `SKU2` through `SKU10` blank
 - Verify before delivery
+
+## Error Remediation
+
+| Import error | Cause | Fix |
+|---|---|---|
+| カテゴリIDの形式または値が正しくありません | Category ID not valid for Mercari Shops (marketplace-only leaf) | Re-run `prepare_categories.py` with the updated "その他" fallback rules |
+| 画像データの取得に失敗しました | Images >10MB or inaccessible from Mercari's servers | Run `prepare_oversize_images_for_mercari.py` to resize and rehost on R2 before building CSV |
+| SKU1_商品管理コードは既に登録されています | Product already listed in Mercari Shops | Not a bug — skip re-upload for that SKU |
 
 ## Upload
 

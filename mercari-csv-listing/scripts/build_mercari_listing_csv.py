@@ -176,7 +176,11 @@ def parse_date(v) -> Optional[dt.date]:
 
 
 def apply_title_prefix(base_title: str, product_row: dict) -> str:
-    # Strip SKU prefix first so it's gone before any title prefixes are added
+    # Strip 元SKU patterns from anywhere in the title
+    base_title = re.sub(
+        r"(?:set\s+)?(?:【)?元[Ss][Kk][Uu](?:[：:]|\s+)[A-Z0-9-]+(?:】)?\s*",
+        "", base_title, flags=re.IGNORECASE,
+    )
     base_title = re.sub(r"^[A-Z0-9-]+\s*", "", base_title)
     title = base_title
     unit_price = num_value(product_row.get("Unit Price"))
@@ -232,23 +236,6 @@ def parse_urls(cell) -> List[str]:
     return []
 
 
-def head_filter_image_urls(urls: List[str]) -> Tuple[List[str], int, int]:
-    valid: List[str] = []
-    excluded = 0
-    failed = 0
-    for u in urls:
-        try:
-            req = urllib.request.Request(u, method="HEAD")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                cl = resp.headers.get("Content-Length")
-                if cl and int(cl) >= 10_485_760:
-                    excluded += 1
-                    continue
-            valid.append(u)
-        except Exception:
-            failed += 1
-            valid.append(u)
-    return valid, excluded, failed
 
 
 def fetch_giga_images(item_codes: List[str]) -> Dict[str, List[str]]:
@@ -276,7 +263,7 @@ def fetch_giga_images(item_codes: List[str]) -> Dict[str, List[str]]:
     return result
 
 
-def get_product_images(prod: dict, giga_images: List[str], shipping_guide_url: str, do_head_filter: bool = False) -> List[str]:
+def get_product_images(prod: dict, giga_images: List[str], shipping_guide_url: str) -> List[str]:
     urls: List[str] = []
     img_json = parse_urls(prod.get("Image URLs JSON"))
     if img_json:
@@ -288,9 +275,6 @@ def get_product_images(prod: dict, giga_images: List[str], shipping_guide_url: s
         for u in giga_images:
             if u not in urls:
                 urls.append(u)
-    if do_head_filter:
-        valid, _excluded, _failed = head_filter_image_urls(urls)
-        urls = valid if valid else urls
     if len(urls) < 20:
         urls = urls + [shipping_guide_url]
     else:
@@ -777,7 +761,7 @@ def main() -> None:
             excluded_gates.append((code, "no_unit_price"))
             continue
 
-        fulfillment_fees = num_value(prod.get("Unit Fulfillment Fees (Drop Shipping)"))
+        fulfillment_fees = num_value(prod.get("Unit Fulfillment Fee (Drop Shipping)"))
         if fulfillment_fees is None:
             excluded_gates.append((code, "no_fulfillment_fees"))
             continue

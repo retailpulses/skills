@@ -39,9 +39,10 @@ class ImageRef:
     url: str
     row_id: int
     item_code: str
-    source_type: str  # single | multi
+    source_type: str  # single | multi | json_array
     multi_urls: Optional[List[str]] = None
     multi_index: Optional[int] = None
+    json_array_urls: Optional[List[str]] = None  # full array for source_type=json_array
 
 
 @dataclass
@@ -308,8 +309,12 @@ def discover_image_fields(row: dict) -> Tuple[Optional[str], List[str], Optional
     return main, [k for _, k in exclude], additional
 
 
-def collect_all_image_refs(rows: List[dict], item_code_field: str) -> List[ImageRef]:
-    """Collect all image refs from all rows into a flat list for parallel processing."""
+def collect_all_image_refs(rows: List[dict], item_code_field: str, image_field: str = "Image URLs JSON") -> List[ImageRef]:
+    """Collect all image refs from all rows into a flat list for parallel processing.
+
+    Primary source: *image_field* (JSON array of URL strings).
+    Fallback: legacy individual image fields.
+    """
     refs: List[ImageRef] = []
     for row in rows:
         item_code = str(row.get(item_code_field) or "").strip()
@@ -317,6 +322,25 @@ def collect_all_image_refs(rows: List[dict], item_code_field: str) -> List[Image
         if not item_code or row_id is None:
             continue
 
+        json_raw = row.get(image_field)
+        if json_raw:
+            try:
+                json_urls = json.loads(json_raw) if isinstance(json_raw, str) else json_raw
+                if isinstance(json_urls, list) and json_urls:
+                    for idx, u in enumerate(json_urls):
+                        u = str(u).strip()
+                        if u and u.startswith("http"):
+                            refs.append(ImageRef(
+                                field_name=image_field, slot=idx + 1, url=u,
+                                row_id=row_id, item_code=item_code,
+                                source_type="json_array",
+                                json_array_urls=json_urls, multi_index=idx,
+                            ))
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Fallback: legacy individual image fields
         main, exclude_fields, additional = discover_image_fields(row)
         slot = 1
 
@@ -326,7 +350,7 @@ def collect_all_image_refs(rows: List[dict], item_code_field: str) -> List[Image
         single_fields.extend(exclude_fields)
 
         for field in single_fields:
-            urls, stype = parse_urls_from_value(row.get(field))
+            urls, _stype = parse_urls_from_value(row.get(field))
             if not urls:
                 continue
             refs.append(ImageRef(
@@ -336,7 +360,7 @@ def collect_all_image_refs(rows: List[dict], item_code_field: str) -> List[Image
             slot += 1
 
         if additional:
-            add_urls, stype = parse_urls_from_value(row.get(additional))
+            add_urls, _stype = parse_urls_from_value(row.get(additional))
             for idx, u in enumerate(add_urls):
                 refs.append(ImageRef(
                     field_name=additional, slot=slot, url=u,
@@ -475,9 +499,21 @@ def _download_with_retry(session: requests.Session, url: str, timeout: int = 60)
 
 # ── Build field patches from results ─────────────────────────────────
 
-def build_patch_for_field(ref: ImageRef, new_url: str, multi_state: Dict[str, List[str]]) -> dict:
+def build_patch_for_field(ref: ImageRef, new_url: str, multi_state: Dict[str, List[str]], json_array_state: Dict[str, list]) -> dict:
     if ref.source_type == "single":
         return {ref.field_name: new_url}
+
+    if ref.source_type == "json_array":
+        if ref.json_array_urls is None or ref.multi_index is None:
+            return {}
+        arr = json_array_state.get(ref.field_name)
+        if arr is None:
+            arr = list(ref.json_array_urls)
+            json_array_state[ref.field_name] = arr
+        if ref.multi_index < len(arr):
+            arr[ref.multi_index] = new_url
+        return {ref.field_name: json.dumps(arr, ensure_ascii=False)}
+
     if ref.multi_urls is None or ref.multi_index is None:
         return {}
     urls = multi_state.get(ref.field_name)
@@ -499,7 +535,9 @@ def main() -> None:
         )
     )
     parser.add_argument("--token", default=None)
-    parser.add_argument("--table-id", type=int, default=912520)
+    parser.add_argument("--table-id", type=int, default=886994)
+    parser.add_argument("--image-field", default="Image URLs JSON",
+                        help="Baserow field name containing image URLs (JSON array). Falls back to legacy fields if empty.")
     parser.add_argument("--item-code-field", default="Item Code")
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     parser.add_argument("--max-side", type=int, default=1500)
@@ -561,7 +599,7 @@ def main() -> None:
         rows = [r for r in rows if str(r.get(args.item_code_field) or "").strip() in item_codes_filter]
 
     # ── Collect all image refs ───────────────────────────────────
-    all_refs = collect_all_image_refs(rows, args.item_code_field)
+    all_refs = collect_all_image_refs(rows, args.item_code_field, args.image_field)
     if not all_refs:
         print(json.dumps({
             "bucket_effective": bucket,
@@ -608,6 +646,7 @@ def main() -> None:
     # ── Build patches grouped by row ─────────────────────────────
     row_patches: Dict[int, Dict[str, str]] = {}
     row_multi_state: Dict[int, Dict[str, List[str]]] = {}
+    row_json_array_state: Dict[int, Dict[str, list]] = {}
     ref_by_result = {r.slot: r for r in all_refs}  # crude but works for patch building
 
     for result in results:
@@ -631,6 +670,8 @@ def main() -> None:
                 row_patches[result.row_id] = {}
             if result.row_id not in row_multi_state:
                 row_multi_state[result.row_id] = {}
+            if result.row_id not in row_json_array_state:
+                row_json_array_state[result.row_id] = {}
 
             # Find the matching ref to build the patch
             matching_ref = None
@@ -641,7 +682,9 @@ def main() -> None:
 
             if matching_ref:
                 patch = build_patch_for_field(
-                    matching_ref, result.new_url, row_multi_state[result.row_id]
+                    matching_ref, result.new_url,
+                    row_multi_state[result.row_id],
+                    row_json_array_state[result.row_id],
                 )
                 row_patches[result.row_id].update(patch)
 
