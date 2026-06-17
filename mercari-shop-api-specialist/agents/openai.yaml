@@ -1,0 +1,7 @@
+interface:
+  display_name: "Mercari Shop API Specialist"
+  short_description: "Mercari Shops API work from the Conoha VPS fixed IPv4 path."
+  default_prompt: "Use $mercari-shop-api-specialist for Mercari Shops API access, SSH to root@160.251.141.110 with ~/.ssh/id_ed25519, force IPv4 with curl -4, and run read-only queries before writes."
+
+policy:
+  allow_implicit_invocation: true

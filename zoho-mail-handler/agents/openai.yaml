@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zoho Mail Handler"
+  short_description: "Search/summarize and reply via Zoho Mail API"
+  default_prompt: "Search Zoho Mail by sender/keyword and summarize, or draft/preview a reply to a specific messageId."

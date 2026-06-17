@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "hooks": {
+    "pre_install": [],
+    "post_install": [
+      {
+        "name": "verify_mcp_servers",
+        "description": "验证必需的 MCP 服务已配置",
+        "script": "scripts/verify_setup.py",
+        "required": true
+      }
+    ],
+    "pre_execute": [
+      {
+        "name": "check_dependencies",
+        "description": "检查 Python 依赖是否已安装",
+        "command": "python3 -c \"import requests, bs4; print('Dependencies OK')\"",
+        "required": true
+      }
+    ],
+    "post_execute": [
+      {
+        "name": "log_execution",
+        "description": "记录执行日志",
+        "script": "scripts/log_execution.py",
+        "required": false
+      }
+    ]
+  },
+  
+  "triggers": {
+    "manual": {
+      "enabled": true,
+      "description": "手动触发优化流程"
+    },
+    "scheduled": {
+      "enabled": true,
+      "description": "定时监控主图点击率",
+      "cron": "0 10 * * *",
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  
+  "permissions": {
+    "mcp_access": [
+      "19cf03a191f"
+    ],
+    "browser_automation": true,
+    "file_write": true,
+    "network_access": true
+  },
+  
+  "rate_limits": {
+    "max_requests_per_minute": 10,
+    "max_images_per_batch": 20,
+    "max_products_per_run": 50
+  }
+}

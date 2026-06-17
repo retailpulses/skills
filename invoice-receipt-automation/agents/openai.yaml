@@ -1,0 +1,7 @@
+interface:
+  display_name: "Invoice Receipt Automation"
+  short_description: "Invoice and 領収書 batch workflow"
+  default_prompt: "Use $invoice-receipt-automation to handle invoice, 領収書, or 领收书 batch work from exported request files."
+
+policy:
+  allow_implicit_invocation: true
