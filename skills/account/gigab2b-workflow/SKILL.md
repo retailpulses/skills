@@ -1,6 +1,6 @@
 ---
 name: gigab2b-workflow
-description: Combined skill for GigaB2B API query access (product detail, price, shipping, saved-products) and sync workflow to Baserow table 886994, using HMAC-SHA256 signed requests.
+description: Combined skill for GigaB2B API query access (product detail, price, shipping, saved-products), sync workflow, and patch-incomplete mode for Baserow table 886994, using HMAC-SHA256 signed requests.
 ---
 
 # GigaB2B Workflow
@@ -168,6 +168,180 @@ Request body for the last-30-days sync:
 - `sort = 4`
 
 The last-30-days mode should be interpreted as collection/saved time, not product creation time.
+
+## Patch Incomplete Mode
+
+Use this mode to find products in Baserow table 886994 that have blank mandatory fields and fill them in using GigaB2B detail and price API data.
+
+### When to Use
+
+- After a sync that created rows with only `Item Code` + `Product Name`.
+- When products have hollow records — blank `Product Features`, `Product Specification`, `Store Code`, etc.
+- When the user asks to "fill in missing product data" or "patch incomplete products".
+
+### Input Modes
+
+1. **Scan all rows** — fetch all rows from 886994, identify incomplete ones, and patch them.
+2. **Explicit Item Code list** — patch only the specified Item Codes.
+3. **Limit mode** — patch up to N incomplete products (e.g., `--limit 50`).
+
+If the user does not specify a mode, default to scanning all rows with a dry-run first to report counts.
+
+### Mandatory Fields (Completeness Check)
+
+A product row is **incomplete** if ANY of these fields is blank/null/empty:
+
+| Field | Priority | Source API |
+|---|---|---|
+| `Product Name` | Critical | Detail API |
+| `Product Features` | Critical | Detail API (built from `characteristics[]`) |
+| `Product Specification` | Critical | Detail API (built from `description` + `attributes` + dimensions) |
+| `Store Code` | High | Detail API (`sellerCode`) |
+| `Store Name` | High | Detail API (`sellerStore`) |
+| `Product Main Image` | High | Detail API (`mainImageUrl` or `imageList[0]`) |
+| `Image URLs JSON` | High | Detail API (`imageList[]` serialized as JSON array) |
+| `Unit Price` | High | Price API (`unitPrice`) |
+| `Unit Fulfillment Fee (Drop Shipping)` | High | Detail API (`fulfillmentFee`) or Price API |
+
+A row is considered "incomplete" even if only one of these fields is blank. The patch operation should fill ALL blank mandatory fields in a single PATCH per row.
+
+### Workflow
+
+#### Phase 1: Discover Incomplete Rows
+
+1. **Fetch all rows from Baserow 886994** with `user_field_names=true`, paginated (size=200).
+2. For each row, check the mandatory fields listed above.
+3. Build a list of incomplete rows: `{row_id, item_code, missing_fields: [...]}`.
+4. If `--dry-run` is set, **report counts and stop** — do not call GigaB2B or write anything.
+
+Report format for dry-run:
+```
+Total rows scanned: 1,234
+Incomplete rows found: 342
+  Missing Product Name: 5
+  Missing Product Features: 310
+  Missing Product Specification: 298
+  Missing Store Code: 45
+  Missing Store Name: 45
+  Missing Product Main Image: 120
+  Missing Image URLs JSON: 130
+  Missing Unit Price: 15
+  Missing Unit Fulfillment Fee (Drop Shipping): 200
+```
+
+#### Phase 2: Fetch Rich Data from GigaB2B
+
+For each incomplete row, we need data from two APIs:
+
+**Detail API** (`POST /b2b-overseas-api/v1/buyer/product/detailInfo/v1`):
+- Send `skus` in batches of up to 200.
+- Response fields used: `productName`, `description`, `characteristics[]`, `attributes[]`, `sellerCode`, `sellerStore`, `mainImageUrl`, `imageList[]`, `packageWeight`, `packageLength`, `packageWidth`, `packageHeight`, `fulfillmentFee`.
+
+**Price API** (`POST /b2b-overseas-api/v1/buyer/product/price/v1`):
+- Send `skus` in batches of up to 200.
+- Response fields used: `unitPrice`.
+
+Call both APIs for the full set of incomplete SKUs. Merge results keyed by SKU.
+
+#### Phase 3: Build Patches
+
+For each incomplete row, construct a PATCH payload containing ONLY the fields that are currently blank AND have data available from the APIs:
+
+**`Product Name`** — use `productName` from detail API.
+
+**`Product Features`** — Build a formatted string from `characteristics[]`:
+```
+Brand: {brand}
+Material: {material}
+Color: {color}
+Style: {style}
+...
+```
+If `characteristics[]` is empty, construct from `attributes[]` key-value pairs.
+Format as one feature per line, with the key in bold or as a label: `**Key:** Value`.
+
+**`Product Specification`** — Build a formatted string combining:
+- `description` (product description text)
+- Dimensions: `Assembled Size: {length}×{width}×{height} cm`
+- Weight: `Product Weight: {weight} kg`
+- Package: `Package Size: {pkgLength}×{pkgWidth}×{pkgHeight} cm, {pkgWeight} kg`
+- Country of origin (from `attributes[]`)
+- Any other relevant attributes
+
+Format as sections with clear headers. Use Japanese labels if the product is for Japan marketplaces.
+
+**`Store Code`** — use `sellerCode` from detail API.
+
+**`Store Name`** — use `sellerStore` from detail API.
+
+**`Product Main Image`** — use `mainImageUrl` if present; otherwise use the first URL from `imageList[]`.
+
+**`Image URLs JSON`** — serialize ALL URLs from `imageList[]` as a JSON array string:
+```json
+["https://img.gigab2b.com/...", "https://img.gigab2b.com/..."]
+```
+Only include the JSON array, not an object wrapper.
+
+**`Unit Price`** — use `unitPrice` from price API (number, not string).
+
+**`Unit Fulfillment Fee (Drop Shipping)`** — use `fulfillmentFee` from detail API or shipping-related field from price API. If both APIs have a value and they differ, prefer the detail API value and note the discrepancy.
+
+#### Phase 4: Apply Patches
+
+1. Sort patches by priority: rows with more missing critical fields first.
+2. PATCH each row individually via `PATCH /api/database/rows/table/886994/{row_id}/?user_field_names=true`.
+3. Use the Baserow database token (`BASEROW_TOKEN` or `RP_BASEROW_TOKEN`).
+4. Rate-limit: wait at least 100ms between PATCH calls to avoid API throttling.
+5. Track successes and failures.
+
+#### Phase 5: Verify & Report
+
+1. After all patches are applied, re-read a sample of patched rows (at least 10% or 10 rows, whichever is larger).
+2. Verify that previously-blank fields are now populated.
+3. Verify that previously-populated fields were NOT overwritten.
+4. Report:
+
+```
+Patch Incomplete Products — Complete
+
+Rows scanned: 1,234
+Incomplete found: 342
+Successfully patched: 338
+Failed: 4
+  - SKU ABC123: Baserow API error 500
+  - SKU DEF456: Detail API returned empty data
+  - SKU GHI789: Price API timeout
+  - SKU JKL012: No detail data found for this SKU
+
+Fields filled:
+  Product Name: 3
+  Product Features: 305
+  Product Specification: 290
+  Store Code: 40
+  Store Name: 40
+  Product Main Image: 115
+  Image URLs JSON: 125
+  Unit Price: 12
+  Unit Fulfillment Fee (Drop Shipping): 195
+
+Verification: 10 rows spot-checked — all patches correct, no overwrites detected.
+```
+
+### Safety Rules
+
+- **Never overwrite existing data.** For each field, check if it's blank BEFORE building the patch. If a field has a value, skip it — do not include it in the PATCH payload.
+- **Never invent data.** If the GigaB2B APIs don't return a value for a field, leave it blank. Do not fabricate, infer, or guess.
+- **Dry-run first.** Always offer `--dry-run` as the first step so the user can see counts before any writes happen.
+- **Limit mode.** Support `--limit N` to cap the number of products patched in a single run.
+- **Batch size.** Send at most 200 SKUs per detail/price API call (the GigaB2B API limit).
+- **Idempotent.** Running the patch mode twice should be safe — the second run finds nothing to patch (all fields already filled).
+- **Handle missing SKUs.** If the detail API returns no data for a SKU (e.g., product was delisted), skip that row and report it as "not found in GigaB2B."
+- **Stop on auth failure.** If GigaB2B or Baserow auth fails, stop immediately and report which credential is missing/broken.
+
+### Credentials Used
+
+- Same as Query/Sync modes: `GIGA_CLIENT_ID`, `GIGA_CLIENT_SECRET`, `GIGA_API_BASE_URL`
+- Baserow: `BASEROW_TOKEN` or `RP_BASEROW_TOKEN`
 
 ## Shared Resources
 

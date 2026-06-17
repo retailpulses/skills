@@ -85,3 +85,13 @@ If the user does not clearly specify a mode, ask which mode to use.
 ## Reference
 
 - See [GIGAB2B_API_ACCESS.md](references/GIGAB2B_API_ACCESS.md) for the repo-specific auth and API access flow.
+
+## Note: This Skill is Deprecated
+
+This skill has been merged into **`gigab2b-workflow`** which now includes:
+
+- **Query Mode** — direct GigaB2B API queries (product detail, price, shipping, saved-products).
+- **Sync Mode** — the append-only sync described in this file.
+- **Patch Incomplete Mode** — scan Baserow table 886994 for rows with blank mandatory fields (`Product Name`, `Product Features`, `Product Specification`, `Store Code`, `Store Name`, `Product Main Image`, `Image URLs JSON`, `Unit Price`, `Unit Fulfillment Fee (Drop Shipping)`) and fill them using GigaB2B detail and price API data, without overwriting existing content.
+
+Use `gigab2b-workflow` for all GigaB2B ↔ Baserow operations going forward.
