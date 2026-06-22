@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<request>
+  <couponIssueRequest>
+    <coupon>
+      <couponName>サマーセール10%オフ</couponName>
+      <couponCaption>全品10%割引</couponCaption>
+      <couponStartDate>2026-07-01T00:00:00+09:00</couponStartDate>
+      <couponEndDate>2026-07-31T23:59:59+09:00</couponEndDate>
+      <couponIssueCount>1000</couponIssueCount>
+      <itemType>4</itemType>
+      <discountType>2</discountType>
+      <discountFactor>10</discountFactor>
+      <combineFlag>0</combineFlag>
+    </coupon>
+  </couponIssueRequest>
+</request>

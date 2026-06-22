@@ -1,0 +1,20 @@
+{
+  "name": "rakuten-promotion-api",
+  "version": "1.0.0",
+  "description": "TypeScript API client for Rakuten RMS Coupon & Thanks Coupon APIs",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<result>
+  <status>
+    <interfaceId>coupon.issue</interfaceId>
+    <systemStatus>NG</systemStatus>
+    <message>Validation error</message>
+    <requestId>req-err-789</requestId>
+  </status>
+  <errors>
+    <error>
+      <code>COUPON-001</code>
+      <message>クーポン名が長すぎます（最大50文字）</message>
+    </error>
+    <error>
+      <code>COUPON-003</code>
+      <message>開始日と終了日の指定が不正です</message>
+    </error>
+  </errors>
+</result>

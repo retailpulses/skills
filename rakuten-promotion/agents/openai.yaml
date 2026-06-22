@@ -1,0 +1,7 @@
+interface:
+  display_name: "Rakuten Promotion API"
+  short_description: "Create and manage Rakuten RMS coupons and thanks coupons"
+  default_prompt: "Use $rakuten-promotion to create, update, search, or delete Rakuten coupons and thanks coupons. The TypeScript client is at scripts/src/index.ts. Instantiate with createPromotionClient({ serviceSecret, licenseKey }). Credentials from RAKUTEN_SERVICE_SECRET + RAKUTEN_LICENSE_KEY env vars. Use dryRun: true for testing. For production mutations, confirm with user first per CLAUDE.md Section 3."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<result>
+  <status>
+    <interfaceId>coupon.search</interfaceId>
+    <systemStatus>OK</systemStatus>
+    <message></message>
+    <requestId>req-def-456</requestId>
+  </status>
+  <allCount>2</allCount>
+  <coupons>
+    <coupon>
+      <couponCode>COUPON001</couponCode>
+      <couponName>テストクーポン1</couponName>
+      <couponCaption>テスト1</couponCaption>
+      <couponStartDate>2026-06-01T00:00:00+09:00</couponStartDate>
+      <couponEndDate>2026-06-30T23:59:59+09:00</couponEndDate>
+      <couponIssueCount>500</couponIssueCount>
+      <itemType>4</itemType>
+      <discountType>2</discountType>
+      <discountFactor>5</discountFactor>
+      <combineFlag>0</combineFlag>
+    </coupon>
+    <coupon>
+      <couponCode>COUPON002</couponCode>
+      <couponName>テストクーポン2</couponName>
+      <couponCaption>テスト2</couponCaption>
+      <couponStartDate>2026-07-01T00:00:00+09:00</couponStartDate>
+      <couponEndDate>2026-07-31T23:59:59+09:00</couponEndDate>
+      <couponIssueCount>300</couponIssueCount>
+      <itemType>1</itemType>
+      <discountType>1</discountType>
+      <discountFactor>500</discountFactor>
+      <combineFlag>1</combineFlag>
+    </coupon>
+  </coupons>
+</result>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<result>
+  <status>
+    <interfaceId>coupon.issue</interfaceId>
+    <systemStatus>OK</systemStatus>
+    <message></message>
+    <requestId>req-abc-123</requestId>
+  </status>
+  <couponIssueResult>
+    <couponCode>ABC123DEF456</couponCode>
+    <pcGetUrl>https://coupon.rakuten.co.jp/get/ABC123DEF456</pcGetUrl>
+  </couponIssueResult>
+</result>

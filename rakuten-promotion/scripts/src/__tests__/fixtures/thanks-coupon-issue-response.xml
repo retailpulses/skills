@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<result>
+  <status>
+    <interfaceId>thankscoupon.issue</interfaceId>
+    <systemStatus>OK</systemStatus>
+    <message></message>
+    <requestId>req-thanks-001</requestId>
+  </status>
+  <thanksCouponId>123456</thanksCouponId>
+</result>

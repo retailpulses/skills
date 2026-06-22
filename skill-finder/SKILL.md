@@ -1,111 +1,142 @@
 ---
 name: skill-finder
-description: Find, search, recommend, and install agent skills from the internal catalog, skills.sh, ClawHub, and SkillsMP. Use when user asks to find, search, discover, or choose skills, or says "how do I do X", "find a skill for X", "is there a skill that can...", or expresses interest in extending capabilities.
-always_apply: true
+description: "Search, install, and manage Agent Skills locally and from GitHub, then help decide whether the task really needs a skill or another customization primitive. Use when looking for skills, installing skills, managing a skill collection, or choosing between a skill, prompt, instruction, or agent."
+argument-hint: "探したい skill の用途やキーワード"
+user-invocable: true
+license: CC BY-NC-SA 4.0
+metadata:
+  author: yamapan (https://github.com/aktsmm)
 ---
 
 # Skill Finder
 
-When a user asks to **find**, **search**, **discover**, or **install** agent skills, use this skill to search across platforms, evaluate results, and install the best match.
+Full-featured Agent Skills management tool.
 
-## Available Platforms
+## When to Use
 
-| Platform | Best For | Search Method |
-|----------|----------|---------------|
-| **Internal Catalog** | Official/first-party skills, already vetted | Local file read |
-| **skills.sh** | Open-source, workflow automation | CLI: `npx skills find` |
-| **ClawHub** | Community-driven, version management | CLI: `clawhub search` |
-| **SkillsMP** | Largest database (283K+), AI semantic search | REST API |
+- **Find skill**, **search skill**, **install skill**, **スキル検索**
+- Looking for skills for a specific task or domain
+- Finding and installing skills locally
+- Managing favorites with star feature
+- Checking whether the ask really calls for a skill before recommending one
 
-## Decision Tree
+## Recommendation Gate
 
-### Step 1: Analyze User Query
+Before searching, check whether the user really wants a **skill**.
 
-**Specific platform requested:**
-- "from internal" / "internal catalog" -> Internal Catalog only
-- "from skills.sh" -> skills.sh only
-- "from clawhub" -> ClawHub only
-- "from skillsmp" -> SkillsMP only
+| If the ask sounds like...              | Prefer...   |
+| -------------------------------------- | ----------- |
+| Single slash task                      | Prompt      |
+| Always-on or file-scoped guidance      | Instruction |
+| Persona, tool restrictions, delegation | Agent       |
+| Deterministic enforcement              | Hook        |
+| Reusable packaged workflow             | Skill       |
 
-**Otherwise -> ALWAYS start with Internal Catalog, then escalate if needed.**
+If the answer is not **Skill**, explain that first instead of forcing a skill recommendation.
 
-### Step 2: Search Internal Skill Catalog (ALWAYS do this first)
+> 上表は「skill を勧めるべきか」の即時ゲート。primitive 選択の詳細 SSOT は **agentic-workflow-guide** skill。
 
-Check locally installed skills and the internal catalog for matching skills by name or description. Look for skills that match the user's domain keywords.
+→ **[references/customization-routing.md](references/customization-routing.md)** for routing patterns
 
-### Step 3: Choose Search Strategy (External Platforms)
+## Features
 
-**Strategy A: Single Platform (Fast)**
-1. Run `npx skills find <query>`
-2. If a good match is found, install it directly
+| Feature | Description                             |
+| ------- | --------------------------------------- |
+| Search  | Local index + GitHub API + Web fallback |
+| Tags    | Filter by category (`#azure #bicep`)    |
+| Install | Download to local directory             |
+| Star    | Mark and manage favorites               |
+| Update  | Sync all sources from GitHub            |
 
-**Strategy B: Multi-Platform Search (Comprehensive)**
-Search all three platforms in parallel:
-- `npx skills find <query>`
-- `clawhub search <query>`
-- SkillsMP API search
-
-**Strategy C: Retry with Alternative Keywords**
-Try up to 3 times with different queries per platform. Use synonyms, broader/narrower terms. For example, if `npx skills find deploy` has no good match, try `npx skills find deployment` or `npx skills find ci-cd`.
-
-**Pro Tip:** For specialized/niche queries (e.g., "arxiv papers", "quantum computing"), always check SkillsMP as it has the largest database.
-
-### Step 4: Evaluate Results and Install
-
-If a suitable skill is found, **pick the best match and install it directly** — do not ask the user for confirmation. Prefer official / most popular packages.
-
-Install to the **current workspace** (committed with the project):
+## Quick Start
 
 ```bash
-npx skills add <owner/repo@skill> -y
+# Search
+python scripts/search_skills.py "pdf"
+python scripts/search_skills.py "#azure #development"
+
+# Management
+python scripts/search_skills.py --info skill-name
+python scripts/search_skills.py --install skill-name
+python scripts/search_skills.py --star skill-name
+
+# Index
+python scripts/search_skills.py --update
+python scripts/search_skills.py --add-source https://github.com/owner/repo
 ```
 
-Do **NOT** use the `-g` flag — skills should be installed locally to the workspace.
+## Command Reference
 
-After installation, briefly report what was installed and what it does. Provide the link to learn more at skills.sh.
+| Command            | Description               |
+| ------------------ | ------------------------- |
+| `<query>`          | Search skills by keyword  |
+| `#tag`             | Filter by category        |
+| `--info SKILL`     | Show skill details        |
+| `--install SKILL`  | Download skill locally    |
+| `--star SKILL`     | Add to favorites          |
+| `--list-starred`   | Show favorites            |
+| `--similar SKILL`  | Find similar skills       |
+| `--update`         | Update index from sources |
+| `--add-source URL` | Add new source repository |
+| `--stats`          | Show index statistics     |
+| `--check`          | Verify dependencies       |
 
-### Step 5: If No Good Match
+## Files
 
-If after 3 attempts no suitable skill is found, **do not install anything**. Instead:
-1. Acknowledge that no existing skill was found
-2. Offer to help with the task directly using your general capabilities
-3. Suggest the user could create their own skill with `npx skills init`
+| File                             | Description               |
+| -------------------------------- | ------------------------- |
+| `scripts/search_skills.py`       | Python script             |
+| `scripts/Search-Skills.ps1`      | PowerShell script         |
+| `references/skill-index.json`    | Skill index (220+ skills) |
+| `references/starred-skills.json` | Your starred skills       |
 
-## Installation Guidelines
+## Requirements
 
-**Default: Install to the agent's own directory.**
+→ **[references/setup-guide.md](references/setup-guide.md)** for installation
 
-Recommended methods:
-1. `git clone` - Safest for single-skill repos
-2. "Install + Move" - Best for monorepos: `npx skills add <repo> --skill <name> -y`
-3. `clawhub install <slug> --force`
-4. SkillsMP -> GitHub clone
+| Tool                 | Required    |
+| -------------------- | ----------- |
+| GitHub CLI (`gh`)    | 2.0+        |
+| curl                 | Any         |
+| Python or PowerShell | One of them |
 
-## Common Skill Categories
+## Agent Instructions
 
-When searching, consider these common categories:
+→ **[references/agent-instructions.md](references/agent-instructions.md)** for complete guide
 
-| Category        | Example Queries                          |
-| --------------- | ---------------------------------------- |
-| Web Development | react, nextjs, typescript, css, tailwind |
-| Testing         | testing, jest, playwright, e2e           |
-| DevOps          | deploy, docker, kubernetes, ci-cd        |
-| Documentation   | docs, readme, changelog, api-docs        |
-| Code Quality    | review, lint, refactor, best-practices   |
-| Design          | ui, ux, design-system, accessibility     |
-| Productivity    | workflow, automation, git                |
+### Core Rules
 
-## Tips for Effective Searches
+- Use "Do it? Yes/No?" style proposals
+- **NEVER** show commands to users - execute silently
+- **ALWAYS** include proposal block after search results
 
-1. **Use specific keywords**: "react testing" is better than just "testing"
-2. **Try alternative terms**: If "deploy" doesn't work, try "deployment" or "ci-cd"
-3. **Check popular sources**: Many skills come from `vercel-labs/agent-skills` or `ComposioHQ/awesome-claude-skills`
+### Search Response Format
 
-## Key Commands Reference
+```
+{N} repos, {M} skills searched (last updated: {date})
 
-- `npx skills find [query]` - Search for skills interactively or by keyword
-- `npx skills add <package>` - Install a skill from GitHub or other sources
-- `npx skills check` - Check for skill updates
-- `npx skills update` - Update all installed skills
+| Skill | Description | Source | Trust |
+| ----- | ----------- | ------ | ----- |
+| ...   | ...         | ...    | ...   |
 
-**Browse skills at:** https://skills.sh/
+**Next?**
+1. Install?
+2. Details?
+3. Update index? (last: {date})
+4. Web search?
+```
+
+### Trust Levels
+
+| Type           | Badge     | Description                |
+| -------------- | --------- | -------------------------- |
+| `official`     | Official  | Anthropic / GitHub 公式    |
+| `awesome-list` | Curated   | キュレーションリスト       |
+| `community`    | Community | コミュニティ製（自己責任） |
+
+## Done Criteria
+
+- [ ] Skill vs non-skill fit checked first
+- [ ] Search query returns results
+- [ ] Skill installed to local directory (if requested)
+- [ ] Index updated successfully (if requested)
