@@ -1,153 +1,237 @@
 ---
-name: mercari-listing
-description: Build a Mercari listing CSV from a list of Item Codes by joining live Baserow product data, pricing/inventory data, shipping lookup data, and Mercari copywriting output. Use when the user asks for a Mercari listing CSV, a Mercari upload file, or to generate the current Mercari CSV template from item codes.
+name: mercari-csv-listing
+description: [DEPRECATED] Build a Mercari listing CSV from Item Codes or a GigaB2B Excel file. Use canonical version at 20_REPOS/mercariops/skills/mercari-csv-listing/ instead.
 ---
 
-# Mercari Listing
+# [DEPRECATED] Mercari Listing CSV
 
-Use this skill when the input is a list of `Item Code` values and the output should be a Mercari listing CSV named with the generation date.
+> **This copy is deprecated.** The canonical version is maintained at:
+> **`20_REPOS/mercariops/skills/mercari-csv-listing/`**
+
+Use when the input is Item Codes or a GigaB2B Excel file and the output is a Mercari listing CSV.
+
+**Listing strategy**: Seller-paid shipping (shipping included in listed price). All data from Baserow table 886994 (Products).
 
 ## Workflow
 
-1. Deduplicate the input item codes.
-2. Inspect the live schema for the required Baserow tables.
-3. Preprocess `912520` images over `10MB` to `1500x1500` progressive JPEG, upload to Cloudflare R2, and write back the replacement URL.
-4. Resolve product data from `912520`, pricing/inventory from `886994`, and shipping lookup data from `914491`.
-5. Confirm a Mercari copy row exists in `912536`; if missing, generate it first with `giga-resource-pack-copywriting`.
-6. Assemble one CSV row per `Item Code` using the current Mercari template schema.
-7. Verify title length, required defaults, and lookup-driven values.
-8. Optional: upload the CSV to Mercari shops by API with per-shop SKU dedupe.
+1. Deduplicate item codes or parse Excel.
+2. Check each Item Code against Baserow 886994. Skip missing codes; at the end, output `missing_products_YYYY-MM-DD.csv`.
+3. Resolve image URLs from 886994.`Image URLs JSON`. If empty, fetch from GigaB2B API and backfill.
+4. Generate title from 886994.`Product Name` (SKU-strip, prefixes, hard trim at 130).
+5. Generate description from 886994.`Product Specification` + prefix boilerplate.
+6. Score listing quality (10-module, 100-point rubric). If score >= 80 and no blocking gates → `商品ステータス = "2"` (OPENED). Otherwise `"1"` (UNOPENED).
+7. Assemble one CSV row per existing Item Code.
+8. User uploads CSV manually via Mercari admin panel (CSV一括機能).
 
-### Required image preprocessing run
+## Prerequisites
 
-Use scripts in `scripts/` before generating the Mercari CSV:
+- `BASEROW_TOKEN` in env or `.env`.
+- `GIGA_CLIENT_ID` and `GIGA_CLIENT_SECRET` for GigaB2B image fetching.
+- Shipping-fee guide image URL.
 
-```bash
-# optional: create/ensure dedicated R2 bucket (name will be normalized)
-bash scripts/create_resize_product_images_bucket.sh "Resize Product Images" "$WRANGLER_CONFIG"
+## Data Source
 
-# required: replace only oversize images (>10MB), then write back URLs to Baserow
-# token can come from --token or BASEROW_TOKEN env (.env/.env.local supported)
-python3 scripts/prepare_oversize_images_for_mercari.py \
-  --table-id 912520 \
-  --r2-bucket "Resize Product Images" \
-  --r2-public-base-url "$R2_PUBLIC_BASE_URL" \
-  --wrangler-config "$WRANGLER_CONFIG"
-```
-
-### Recommended CSV generation command (Item Code direct lookup)
-
-```bash
-python3 scripts/build_mercari_listing_csv.py \
-  --item-codes "$ITEM_CODES_OR_FILE" \
-  --template-csv "$MERCARI_TEMPLATE_CSV" \
-  --shipping-guide-url "$SHIPPING_FEE_GUIDE_URL" \
-  --output-path "$OUTPUT_CSV_PATH"
-```
-
-- This script uses Baserow server-side exact filtering by `Item Code` for `912520`, `886994`, and `912536`, avoiding full-table pagination when item codes are provided.
-- It now resolves Baserow field IDs first and filters by `filter__field_<id>__equal`, which is more robust when field names include spaces/case variants.
-- If Mercari copy is missing for an item, the script auto-runs designated skill `giga-resource-pack-copywriting` runner (`scripts/generate_copywriting_rows.py`) to create missing Mercari copy, then continues CSV build.
-- If designated skill execution still cannot produce copy for some Item Codes, CSV build fails by default with the remaining missing list.
-- Default CSV output encoding is `utf-8-sig` (BOM) to avoid mojibake when opening directly on macOS.
-
-### Optional API upload to 4 shops (skip existing)
-
-```bash
-# dry run
-python3 scripts/upload_mercari_csv_to_shops.py \
-  --csv "$OUTPUT_CSV_PATH" \
-  --shops "shop1,shop2,shop3,shop4" \
-  --mode ssh \
-  --dry-run
-
-# production
-python3 scripts/upload_mercari_csv_to_shops.py \
-  --csv "$OUTPUT_CSV_PATH" \
-  --shops "shop1,shop2,shop3,shop4" \
-  --mode ssh
-```
-
-- For each row and shop, the uploader first checks `productVariant(by: { skuCode })`.
-- If SKU already exists in that shop, the row is skipped for that shop.
-- If create returns an error, the uploader still re-checks by SKU and reconciles final status.
-- Variant name should come from `SKU1_種類` when present; do not hardcode `Default`. If `SKU1_種類` is blank, omit the variant name.
-
-### Secret handling
-
-- Do not hardcode secrets in `SKILL.md`.
-- Put `BASEROW_TOKEN` in environment variables or in skill-local `.env` / `.env.local`.
-- Use `.env.example` as the template.
+Single table: **886994** (Products). No other Baserow tables are used.
 
 ## Baserow Access
 
-- Authenticate with `Authorization: Token <database token>`.
-- Read rows with `user_field_names=true` so the live field labels are usable as keys.
-- Page through tables with `size=200&page=<n>` when reading more than one page.
-- Confirm the live schema before assuming field names or table roles.
-- Source tables are `912520`, `886994`, and `912536`.
-- Use exact `Item Code` matching as the join key across those tables.
-- Do not invent values when a lookup is missing; leave the target field blank and report it.
-- Keep Baserow reads and CSV generation separate; this skill builds the local CSV output only.
-
-## Source Rules
-
-- Use exact `Item Code` matching as the linkage key across tables.
-- Use live Baserow data only; do not rely on stale local snapshots.
-- Do not invent values for pricing, category, stock, or shipping fields.
-- If a lookup is missing, leave the target field blank and report it.
-- Preserve the current CSV column order from the reference template.
+- `Authorization: Token <token>`
+- `user_field_names=true`
+- `size=200&page=<n>` for pagination
 
 ## Title Rules
 
-- Base the title on the Mercari copywriting row for the item.
-- If the effective discount is over `10%`, prepend `数量限定セール`.
-- Derive the effective discount from `Discounted Unit Price` or `Exclusive Price` versus `Unit Price`.
-- If a future restock date exists, prepend `MM/DD再入荷予定`.
-- If both prefixes apply, keep both prefixes and keep them at the start of the title.
-- Keep the final title within `130` characters.
-- When trimming is needed, remove secondary descriptors first and keep the core product name intact.
+Source: 886994.`Product Name`.
+
+1. Strip SKU prefix: `re.sub(r"^[A-Z0-9-]+\s*", "", title)`.
+2. Prepend `数量限定セール` if discount > 10% (`Discounted Unit Price` vs `Unit Price`).
+3. Prepend `MM/DD再入荷予定` if `Restock date` is in the future.
+4. Cap at 130 chars via hard truncation.
+
+## Description Rules
+
+Source: 886994.`Product Specification`.
+
+Structure:
+```
+[prefix boilerplate]
+
+【商品説明】
+
+[content]
+
+[footer]
+```
+
+**Prefix** (default, overridable via `--description-prefix`):
+```
+ホムブリスショップへようこそ
+♪すべての商品は未開封の新品です
+♪フォロー割あり
+♪まとめ買い割あり：2点で2%OFF、3点で3%OFF、最大5%（一部商品適用外）
+♪発送と送料：在庫品は1～2営業日以内に発送、再入荷商品は入荷後1～2営業日以内に発送いたします。北海道は基本的に追加送料不要です。沖縄への送料は別途お見積りが必須です。
+```
+
+**Content**: Raw `Product Specification` text from Baserow.
+
+**Footer**: `--description-footer` (default empty).
 
 ## Field Rules
 
-- `商品名` = Mercari title
-- `商品説明` = Mercari description
-- `SKU1_商品管理コード` = `Item Code`
-- `SKU1_種類` = `Main Color (JP)` from `886994`; if blank, leave `SKU1_種類` blank / `NULL`
-- `販売価格` = `Mercari ref pricing`
-- `SKU1_現在の在庫数` = `Mercari Qty`
-- `カテゴリID` = `Mercari category ID`
-- `送料ID` = shipping bracket from `914491`; if the fee falls between brackets, round up to the next available bracket instead of leaving the field blank
-- `商品の状態` = `1`
-- `配送方法` = `1`
-- `発送元の地域` = `jp13`
-- `発送までの日数` = `5` when `Mercari Qty = 5`, otherwise `1`
-- `商品ステータス` = `1` to keep listings unopened for manual review; the upload layer maps this to `UNOPENED`
-- `配送料の負担` = `2`; the upload layer must map this workflow to buyer-paid shipping (`BUYER`) when a shipping config ID is present
-- Leave `SKU2` through `SKU10` blank and leave other unspecified fields blank.
-
-Critical case:
-
-- Do not remove the `送料ID` lookup just because `createProduct` debugging points at `shippingConfigurationId`. `送料ID` is a required CSV shipping-field value and must stay populated from the shipping bracket logic unless the user explicitly asks to change the Mercari shipping model.
-- Critical case: if Mercari rejects `shippingConfigurationId` on an existing listing, verify the payer enum first. The live API accepts `shippingConfigurationId` only when `shippingPayer=BUYER`; `SELLER` will return `request parameter is invalid`.
+| CSV Column | Source | Rule |
+|---|---|---|
+| `商品名` | 886994.`Product Name` | SKU-strip → prefixes → hard trim at 130 |
+| `商品説明` | 886994.`Product Specification` | Prefix + `【商品説明】` + content + footer |
+| `販売価格` | 886994.`Mercari Effective Pricing (incl. shipping)` | Direct value |
+| `SKU1_商品管理コード` | Item Code | Direct |
+| `SKU1_種類` | 886994.`Representative_Color_JA` | Validated via `is_usable_main_color()`; blank if invalid |
+| `SKU1_在庫数` | 886994.`Mercari Qty` | Direct |
+| `SKU1_現在の在庫数` | 886994.`Mercari Qty` | Same |
+| `カテゴリID` | 886994.`Mercari category ID` | Direct from Baserow; blank if empty |
+| `送料ID` | — | Blank (seller-paid) |
+| `発送までの日数` | 886994.`Inventory Status` | `"3"` if `Incoming Stock` (or `More On The Way > 0` or `Estimated Next Arrival Date` set); otherwise `"1"` |
+| `商品の状態` | Fixed | `"1"` |
+| `配送方法` | Fixed | `"1"` |
+| `発送元の地域` | Fixed | `"jp13"` |
+| `配送料の負担` | Fixed | `"1"` (SELLER-paid) |
+| `商品ステータス` | Quality score | Score >= 80 and no blocking gates → `"2"` (OPENED); else `"1"` (UNOPENED) |
 
 ## Image Rules
 
-- Process only source images over `10MB`.
-- Resize to `1500x1500` max bounds with progressive JPEG output.
-- Upload resized files to the `Resize Product Images` R2 bucket and write back the replacement URL to `912520`.
-- Fill image columns from `Product Main Image`, then `Product Images (exclude main)1..26`, then `Additional Images`.
-- Fill up to `商品画像名_20`; if there are fewer than 20 source images, append the shipping-fee guide image in the last used slot; if there are 20 or more source images, replace slot 20 with the shipping-fee guide image URL.
-- Preserve the template image flag pattern unless the user explicitly asks to rewrite it.
+Source: 886994.`Image URLs JSON` (JSON array). If empty, call GigaB2B API → write back → continue.
+
+Assembly (columns `商品画像名_1` to `商品画像名_20`):
+- Fill slots 1–20 sequentially from the image URL list.
+- If images < 20: append shipping-fee guide image URL in the last used slot.
+- If images >= 20: replace slot 20 with the shipping-fee guide image.
+- Cap at 20 slots.
+
+## Listing Quality Scoring
+
+10-module, 100-point rubric. Threshold: **>= 80 → `"2"` (OPENED)**, else `"1"` (UNOPENED).
+
+All checks use data available from 886994 at CSV build time. No section-structure pattern matching.
+
+### 1. Title Completeness (14 pts)
+
+| Condition | Points |
+|---|---|
+| Title empty | 0 (BLOCKED) |
+| < 80 chars | 2 |
+| 80–99 chars | 8 |
+| 100–130 chars | 14 |
+| > 130 chars (post-trim) | 0 (BLOCKED) |
+| Contains core product noun (家具/ベッド/チェア/テーブル/収納/ラック/ソファ/デスク/キャビネット/マットレス/スツール/棚/机) | Required; if absent, max 4 |
+| Contains dimension keywords (cm/mm/幅/奥行/高さ) | +2 bonus (capped at 14) |
+
+### 2. Description Quality (14 pts)
+
+| Condition | Points |
+|---|---|
+| Description empty | 0 (BLOCKED) |
+| < 500 chars | 2 |
+| 500–1199 chars | 6 |
+| 1200–1999 chars | 10 |
+| 2000–3000 chars | 14 |
+| > 3000 chars | 0 (BLOCKED) |
+| `・` bullets >= 3 | +2 bonus (capped at 14) |
+
+### 3. Image Count (14 pts)
+
+| Condition | Points |
+|---|---|
+| 0 valid images | 0 (BLOCKED) |
+| 1–2 images | 4 |
+| 3–6 images | 8 |
+| 7–9 images | 11 |
+| 10–14 images | 13 |
+| 15–20 images | 14 |
+
+### 4. Category ID (12 pts)
+
+| Condition | Points |
+|---|---|
+| `Mercari category ID` empty after resolution | 0 |
+| Resolved and non-empty | 12 |
+
+### 5. Pricing (12 pts)
+
+| Condition | Points |
+|---|---|
+| `Mercari Effective Pricing (incl. shipping)` = 0 or empty | 0 (BLOCKED) |
+| 1–999 JPY | 4 |
+| 1000–4999 JPY | 8 |
+| 5000+ JPY | 12 |
+
+### 6. Variant Name (`SKU1_種類`) (8 pts)
+
+| Condition | Points |
+|---|---|
+| Empty / invalid | 0 |
+| Valid `Representative_Color_JA` present | 8 |
+
+### 7. Inventory & Dispatch Clarity (8 pts)
+
+| Condition | Points |
+|---|---|
+| `Mercari Qty` = 0 | 0 |
+| `Mercari Qty` >= 1 and `Inventory Status` != Incoming Stock | 8 |
+| `Mercari Qty` >= 1 and `Inventory Status` = Incoming Stock | 6 |
+
+### 8. Shipping Fee Guide Image (6 pts)
+
+| Condition | Points |
+|---|---|
+| Shipping-fee guide image appended in image slots | 6 |
+| Not present | 0 |
+
+### 9. Discount / Urgency Signals (6 pts)
+
+| Condition | Points |
+|---|---|
+| Discount > 0% (`Discounted Unit Price` < `Unit Price`) | 4 |
+| Discount > 10% | 6 |
+| No discount | 2 |
+
+### 10. Product Specification Length (6 pts)
+
+| Condition | Points |
+|---|---|
+| `Product Specification` empty | 0 |
+| < 200 chars | 2 |
+| 200–799 chars | 4 |
+| 800+ chars | 6 |
+
+### Blocking Gates
+
+If any gate is triggered, score = 0 and `商品ステータス` = `"1"` regardless of module total.
+
+| Gate | Condition |
+|---|---|
+| `BLOCKED:no_title` | Title empty or > 130 chars |
+| `BLOCKED:no_description` | Description empty or > 3000 chars |
+| `BLOCKED:no_images` | 0 valid images |
+| `BLOCKED:no_price` | Price = 0 or empty |
+
+## Missing Products Report
+
+For input Item Codes not found in Baserow 886994:
+- Skip from the listing CSV.
+- Output `missing_products_YYYY-MM-DD.csv` listing those codes.
 
 ## Output Rules
 
-- Write the final file as `mercari_listing_YYYY-MM-DD.csv` by default.
-- Preserve all template columns, even if many remain blank.
-- Verify the final CSV before delivery.
+- Listing CSV: `mercari_listing_YYYY-MM-DD.csv`
+- Missing report: `missing_products_YYYY-MM-DD.csv`
+- Encoding: `utf-8-sig` (BOM)
+- Preserve all template columns; leave `SKU2` through `SKU10` blank
+- Verify before delivery
 
-## References
+## Upload
 
-- See [mercari-csv-listing-schema.md](references/mercari-csv-listing-schema.md) for the table mappings and CSV column conventions.
-- See [image-preprocessing-r2.md](references/image-preprocessing-r2.md) for the R2 image processing flow and command usage.
-- See [api-upload-multishop.md](references/api-upload-multishop.md) for CSV-to-API upload to 4 shops with skip-existing behavior.
+Manual via Mercari admin panel (CSV一括機能). This skill does not handle API upload.
+
+## Secrets
+
+- `BASEROW_TOKEN`, `GIGA_CLIENT_ID`, `GIGA_CLIENT_SECRET` in env or `.env`
+- Do not hardcode

@@ -26,37 +26,44 @@ def create_payslip_pdf(employee_data, month_str, output_path):
     c.drawString(130*mm, height - 45*mm, "東京都葛飾区四つ木2丁目20番4号")
     c.drawString(130*mm, height - 50*mm, "202号室")
     
-    # Employee Info & Month
+    # Employee Info
     c.setFont(font_bold, 12)
     c.drawString(20*mm, height - 35*mm, f"氏名: {employee_data['従業員名']} 様")
     c.drawString(20*mm, height - 45*mm, f"給与年月: {month_str}")
-    
-    # Title (directly below month)
+
+    # Payment Date + Method — lowered to leave gap from company address
+    pay_date = employee_data.get('支払日', month_str)
+    pay_method = employee_data.get('支払い方法', '')
+    c.drawString(20*mm, height - 60*mm, f"支払日: {pay_date}")
+    if pay_method:
+        c.drawString(115*mm, height - 60*mm, f"支払い方法: {pay_method}")
+
+    # Title
     c.setFont(font_bold, 18)
-    c.drawString(20*mm, height - 58*mm, "給与明細")
-    
-    # Attendance info (separate row above payment section)
+    c.drawString(20*mm, height - 73*mm, "給与明細")
+
+    # Attendance info
     c.setFont(font_reg, 12)
-    c.drawString(20*mm, height - 67*mm, f"勤務日数: {employee_data['勤務日数']} 日")
-    
+    c.drawString(20*mm, height - 82*mm, f"勤務日数: {employee_data['勤務日数']} 日")
+
     # Table Header & Borders
     c.setLineWidth(0.5)
-    c.line(20*mm, height - 72*mm, 190*mm, height - 72*mm) # Top border
-    
+    c.line(20*mm, height - 87*mm, 190*mm, height - 87*mm)
+
     # Sections Header
     c.setFont(font_bold, 11)
-    c.drawString(25*mm, height - 80*mm, "【支給項目】 (Earnings)")
-    c.drawString(105*mm, height - 80*mm, "【控除項目】 (Deductions)")
-    
+    c.drawString(25*mm, height - 95*mm, "【支給項目】 (Earnings)")
+    c.drawString(105*mm, height - 95*mm, "【控除項目】 (Deductions)")
+
     # Earnings Data
     c.setFont(font_reg, 10)
-    y = height - 90*mm
+    y = height - 105*mm
     c.drawString(25*mm, y, f"基本給: {employee_data['基本給']:,} 円")
     y -= 7*mm
     c.drawString(25*mm, y, f"その他手当: {employee_data['その他手当']:,} 円")
-    
+
     # Deductions Data
-    y = height - 90*mm
+    y = height - 105*mm
     c.drawString(105*mm, y, f"健康保険料: {employee_data['健康保険料']:,} 円")
     y -= 7*mm
     c.drawString(105*mm, y, f"厚生年金保険料: {employee_data['厚生年金保険料']:,} 円")
@@ -66,23 +73,23 @@ def create_payslip_pdf(employee_data, month_str, output_path):
     c.drawString(105*mm, y, f"所得税: {employee_data['所得税']:,} 円")
     y -= 7*mm
     c.drawString(105*mm, y, f"住民税: {employee_data['住民税']:,} 円")
-    
+
     # Summaries
-    c.line(20*mm, height - 135*mm, 190*mm, height - 135*mm) # Footer line
-    
+    c.line(20*mm, height - 150*mm, 190*mm, height - 150*mm)
+
     total_earnings = employee_data['基本給'] + employee_data['その他手当']
-    total_deductions = (employee_data['健康保険料'] + employee_data['厚生年金保険料'] + 
-                        employee_data['雇用保険料'] + employee_data['所得税'] + 
+    total_deductions = (employee_data['健康保険料'] + employee_data['厚生年金保険料'] +
+                        employee_data['雇用保険料'] + employee_data['所得税'] +
                         employee_data['住民税'])
     net_pay = total_earnings - total_deductions
-    
+
     c.setFont(font_bold, 12)
-    c.drawString(20*mm, height - 145*mm, f"支給額合計: {total_earnings:,} 円")
-    c.drawString(100*mm, height - 145*mm, f"控除額合計: {total_deductions:,} 円")
-    
+    c.drawString(20*mm, height - 160*mm, f"支給額合計: {total_earnings:,} 円")
+    c.drawString(100*mm, height - 160*mm, f"控除額合計: {total_deductions:,} 円")
+
     c.setFont(font_bold, 14)
-    c.drawString(20*mm, height - 160*mm, f"差引支給額 (Net): {net_pay:,} 円")
-    c.drawString(20*mm, height - 170*mm, f"実支給額 (Payout): {employee_data['実支給額']:,} 円")
+    c.drawString(20*mm, height - 175*mm, f"差引支給額 (Net): {net_pay:,} 円")
+    c.drawString(20*mm, height - 185*mm, f"実支給額 (Payout): {employee_data['実支給額']:,} 円")
     
     c.showPage()
     c.save()

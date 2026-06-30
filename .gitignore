@@ -17,3 +17,9 @@ token*
 *.jpg
 *.jpeg
 *.gif
+.venv/
+venv/
+Thumbs.db
+*.swp
+*.swo
+*~

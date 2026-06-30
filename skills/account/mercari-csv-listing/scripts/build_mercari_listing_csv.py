@@ -5,15 +5,18 @@ import datetime as dt
 import json
 import os
 import re
-import subprocess
+import sys
 import time
 import urllib.parse
-import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 
+import requests
+
 BASEROW_API = "https://api.baserow.io/api"
-IMAGE_URL_RE = re.compile(r"https?://[^,\s]+")
-EXCLUDE_MAIN_RE = re.compile(r"^Product Images \(exclude main\)(\d+)$")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mercari_text_utils
 
 UNSUPPORTED_SKU_TYPE_VALUES = {"default", "n/a", "na", "unknown", "-", "ー"}
 INVALID_JP_COLOR_HINTS = ("ください", "教えて", "翻訳", "カタカナで", "わかりました")
@@ -44,31 +47,26 @@ def resolve_token(cli_token: Optional[str]) -> str:
     raise SystemExit("Missing Baserow token. Pass --token or set BASEROW_TOKEN.")
 
 
-def http_json(req: urllib.request.Request, timeout: int = 120) -> dict:
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+def _baserow_headers(token: str) -> dict:
+    return {"Authorization": f"Token {token}"}
 
 
-def fetch_table_fields(token: str, table_id: int) -> List[dict]:
-    headers = {"Authorization": f"Token {token}"}
-    url = f"{BASEROW_API}/database/fields/table/{table_id}/"
-    req = urllib.request.Request(url, headers=headers)
-    data = http_json(req)
-    if isinstance(data, list):
-        return data
-    return []
+def _get_with_retry(session: requests.Session, url: str, token: str, timeout: int = 120) -> dict:
+    last_exc = None
+    for attempt in range(4):
+        try:
+            resp = session.get(url, headers=_baserow_headers(token), timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt == 3:
+                raise
+            time.sleep(1.2 * (attempt + 1))
+    raise last_exc
 
 
-def resolve_field_id(token: str, table_id: int, field_name: str) -> int:
-    fields = fetch_table_fields(token, table_id)
-    for field in fields:
-        if str(field.get("name")) == field_name:
-            return int(field["id"])
-    raise SystemExit(f"Field not found in table {table_id}: {field_name}")
-
-
-def fetch_rows_by_equal_filter(token: str, table_id: int, field_key: str, values: List[str]) -> List[dict]:
-    headers = {"Authorization": f"Token {token}"}
+def fetch_rows_by_equal_filter(session: requests.Session, token: str, table_id: int, field_key: str, values: List[str]) -> List[dict]:
     rows: List[dict] = []
     seen_ids = set()
     for value in sorted(set(v for v in values if v)):
@@ -83,16 +81,7 @@ def fetch_rows_by_equal_filter(token: str, table_id: int, field_key: str, values
                 }
             )
             url = f"{BASEROW_API}/database/rows/table/{table_id}/?{query}"
-            req = urllib.request.Request(url, headers=headers)
-            data = None
-            for attempt in range(4):
-                try:
-                    data = http_json(req)
-                    break
-                except Exception:
-                    if attempt == 3:
-                        raise
-                    time.sleep(1.2 * (attempt + 1))
+            data = _get_with_retry(session, url, token)
             batch = (data or {}).get("results", [])
             if not batch:
                 break
@@ -108,84 +97,26 @@ def fetch_rows_by_equal_filter(token: str, table_id: int, field_key: str, values
     return rows
 
 
-def fetch_all_rows(token: str, table_id: int) -> List[dict]:
-    headers = {"Authorization": f"Token {token}"}
-    rows: List[dict] = []
-    page = 1
-    while True:
-        url = (
-            f"{BASEROW_API}/database/rows/table/{table_id}/"
-            f"?user_field_names=true&size=200&page={page}"
-        )
-        req = urllib.request.Request(url, headers=headers)
-        data = http_json(req)
-        batch = data.get("results", [])
-        if not batch:
-            break
-        rows.extend(batch)
-        if len(batch) < 200:
-            break
-        page += 1
-    return rows
-
-
 def parse_item_codes(value: str) -> List[str]:
     if os.path.isfile(value):
         out: List[str] = []
         with open(value, "r", encoding="utf-8") as f:
-            for line in f:
-                code = line.strip()
-                if code:
-                    out.append(code)
+            first = f.readline().strip()
+            if "," in first or "code" in first.lower() or "name" in first.lower():
+                for line in f:
+                    code = line.strip().split(",")[0].strip('"').strip()
+                    if code:
+                        out.append(code)
+            else:
+                if first:
+                    out.append(first)
+                for line in f:
+                    code = line.strip()
+                    if code:
+                        out.append(code)
         return sorted(set(out))
     out = [x.strip() for x in value.split(",") if x.strip()]
     return sorted(set(out))
-
-
-def parse_urls(cell) -> List[str]:
-    if cell is None:
-        return []
-    if isinstance(cell, str):
-        s = cell.strip()
-        if not s:
-            return []
-        hits = IMAGE_URL_RE.findall(s)
-        return hits if hits else []
-    if isinstance(cell, list):
-        urls: List[str] = []
-        for it in cell:
-            if isinstance(it, dict):
-                u = str(it.get("url") or "").strip()
-                if u:
-                    urls.append(u)
-            elif isinstance(it, str):
-                u = it.strip()
-                if u:
-                    urls.append(u)
-        return urls
-    return []
-
-
-def get_product_image_urls(row: dict) -> List[str]:
-    urls: List[str] = []
-    main = row.get("Product Main Image")
-    if main:
-        u = parse_urls(main)
-        if u:
-            urls.append(u[0])
-    exclude_fields: List[Tuple[int, str]] = []
-    for k in row.keys():
-        m = EXCLUDE_MAIN_RE.match(k)
-        if m:
-            exclude_fields.append((int(m.group(1)), k))
-    exclude_fields.sort(key=lambda x: x[0])
-    for _, k in exclude_fields:
-        u = parse_urls(row.get(k))
-        if u:
-            urls.append(u[0])
-    add = parse_urls(row.get("Additional Images"))
-    urls.extend(add)
-    return [u for u in urls if u]
 
 
 def num_value(v) -> Optional[float]:
@@ -208,27 +139,7 @@ def str_value(v) -> str:
     return str(v).strip()
 
 
-def choose_shipping_id(shipping_rows: List[dict], fee_value: Optional[float]) -> str:
-    if fee_value is None:
-        return ""
-    best: Optional[Tuple[float, str]] = None
-    for row in shipping_rows:
-        lo = num_value(row.get("Lower end"))
-        hi = num_value(row.get("Upper end"))
-        if lo is None or hi is None:
-            continue
-        sid = str_value(row.get("Shipping ID") or row.get("送料ID") or row.get("shipping_id"))
-        if not sid:
-            continue
-        if lo <= fee_value <= hi:
-            return sid
-        if fee_value <= hi:
-            if best is None or hi < best[0]:
-                best = (hi, sid)
-    return best[1] if best else ""
-
-
-def is_usable_main_color_jp(value: str) -> bool:
+def is_usable_main_color(value: str) -> bool:
     if not value:
         return False
     s = value.strip()
@@ -243,58 +154,6 @@ def is_usable_main_color_jp(value: str) -> bool:
     if any(hint in s for hint in INVALID_JP_COLOR_HINTS):
         return False
     return True
-
-
-def sku1_type_from_main_color(main_color_jp_raw) -> str:
-    main_color_jp = str_value(main_color_jp_raw)
-    if is_usable_main_color_jp(main_color_jp):
-        return main_color_jp
-    return ""
-
-
-def best_copy_row(rows: List[dict], item_code: str) -> Optional[dict]:
-    item_rows = [r for r in rows if str_value(r.get("Item Code")) == item_code]
-    if not item_rows:
-        return None
-    mercari_rows = []
-    for r in item_rows:
-        platform = str_value(r.get("Platform") or r.get("Sales Channel") or r.get("platform")).lower()
-        if platform in ("mercari", "mercari shops", "mercari shop"):
-            mercari_rows.append(r)
-    candidates = mercari_rows if mercari_rows else item_rows
-    active_rows = [r for r in candidates if bool(r.get("Active"))]
-    pick = active_rows if active_rows else candidates
-    pick.sort(key=lambda r: int(r.get("id") or 0), reverse=True)
-    return pick[0]
-
-
-def get_copy_text(row: Optional[dict]) -> Tuple[str, str]:
-    if not row:
-        return "", ""
-    title_keys = ["Mercari title", "Title", "商品名", "Mercari タイトル", "mercari_title"]
-    desc_keys = [
-        "Mercari description",
-        "Description",
-        "Description 1",
-        "Description Text",
-        "商品説明",
-        "Mercari 説明",
-        "mercari_description",
-    ]
-    title = ""
-    desc = ""
-    for k in title_keys:
-        title = str_value(row.get(k))
-        if title:
-            break
-    for k in desc_keys:
-        desc = str_value(row.get(k))
-        if desc:
-            break
-    desc2 = str_value(row.get("Description 2"))
-    if desc2:
-        desc = (desc + "\n\n" + desc2).strip() if desc else desc2
-    return title, desc
 
 
 def parse_date(v) -> Optional[dt.date]:
@@ -317,6 +176,8 @@ def parse_date(v) -> Optional[dt.date]:
 
 
 def apply_title_prefix(base_title: str, product_row: dict) -> str:
+    # Strip SKU prefix first so it's gone before any title prefixes are added
+    base_title = re.sub(r"^[A-Z0-9-]+\s*", "", base_title)
     title = base_title
     unit_price = num_value(product_row.get("Unit Price"))
     discounted = num_value(product_row.get("Discounted Unit Price"))
@@ -333,8 +194,108 @@ def apply_title_prefix(base_title: str, product_row: dict) -> str:
     if prefixes:
         title = " ".join(prefixes + [title]).strip()
     if len(title) > 130:
-        title = title[:130]
+        title = re.sub(r"\s+", " ", title)[:130]
     return title
+
+
+def build_description(prod: dict, prefix: str, footer: str) -> str:
+    spec = str_value(prod.get("Product Specification"))
+    if not spec:
+        return ""
+    parts = [prefix, "", "【商品説明】", "", spec]
+    if footer:
+        parts.extend(["", footer])
+    return "\n".join(parts).strip()
+
+
+def parse_urls(cell) -> List[str]:
+    if cell is None:
+        return []
+    if isinstance(cell, str):
+        s = cell.strip()
+        if not s:
+            return []
+        hits = re.findall(r"https?://[^,\s]+", s)
+        return hits if hits else []
+    if isinstance(cell, list):
+        urls: List[str] = []
+        for it in cell:
+            if isinstance(it, dict):
+                u = str(it.get("url") or "").strip()
+                if u:
+                    urls.append(u)
+            elif isinstance(it, str):
+                u = it.strip()
+                if u:
+                    urls.append(u)
+        return urls
+    return []
+
+
+def head_filter_image_urls(urls: List[str]) -> Tuple[List[str], int, int]:
+    valid: List[str] = []
+    excluded = 0
+    failed = 0
+    for u in urls:
+        try:
+            req = urllib.request.Request(u, method="HEAD")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                cl = resp.headers.get("Content-Length")
+                if cl and int(cl) >= 10_485_760:
+                    excluded += 1
+                    continue
+            valid.append(u)
+        except Exception:
+            failed += 1
+            valid.append(u)
+    return valid, excluded, failed
+
+
+def fetch_giga_images(item_codes: List[str]) -> Dict[str, List[str]]:
+    result: Dict[str, List[str]] = {}
+    if not item_codes:
+        return result
+    try:
+        resp = mercari_text_utils._giga_post(
+            "/b2b-overseas-api/v1/buyer/product/detailInfo/v1",
+            {"skus": list(set(item_codes))},
+            timeout=120,
+        )
+    except Exception:
+        return result
+    data_list = resp.get("data") if isinstance(resp, dict) else resp
+    if not isinstance(data_list, list):
+        return result
+    for detail in data_list:
+        sku = detail.get("sku")
+        image_urls = detail.get("imageUrls") or []
+        if sku and isinstance(image_urls, list):
+            urls = [u for u in image_urls if isinstance(u, str) and u.startswith("http")]
+            if urls:
+                result[sku] = urls
+    return result
+
+
+def get_product_images(prod: dict, giga_images: List[str], shipping_guide_url: str, do_head_filter: bool = False) -> List[str]:
+    urls: List[str] = []
+    img_json = parse_urls(prod.get("Image URLs JSON"))
+    if img_json:
+        urls.extend(img_json)
+    else:
+        main_img = parse_urls(prod.get("Product Main Image"))
+        if main_img:
+            urls.append(main_img[0])
+        for u in giga_images:
+            if u not in urls:
+                urls.append(u)
+    if do_head_filter:
+        valid, _excluded, _failed = head_filter_image_urls(urls)
+        urls = valid if valid else urls
+    if len(urls) < 20:
+        urls = urls + [shipping_guide_url]
+    else:
+        urls = urls[:19] + [shipping_guide_url]
+    return urls[:20]
 
 
 def template_fieldnames(path: str, encoding: str) -> Tuple[List[str], Dict[str, str]]:
@@ -350,188 +311,345 @@ def set_if_exists(row: dict, key: str, value) -> None:
         row[key] = value
 
 
-def missing_copy_codes(item_codes: List[str], copy_rows: List[dict]) -> List[str]:
-    missing: List[str] = []
-    for code in item_codes:
-        if not best_copy_row(copy_rows, code):
-            missing.append(code)
-    return sorted(set(missing))
+DEFAULT_DESC_PREFIX = (
+    "ホムブリスショップへようこそ\n"
+    "♪すべての商品は未開封の新品です\n"
+    "♪フォロー割あり\n"
+    "♪まとめ買い割あり：2点で2%OFF、3点で3%OFF、最大5%（一部商品適用外）\n"
+    "♪発送と送料：在庫品は1～2営業日以内に発送、再入荷商品は入荷後1～2営業日以内に発送いたします。"
+    "北海道は基本的に追加送料不要です。沖縄への送料は別途お見積りが必須です。"
+)
 
 
-def run_designated_copywriting_skill(skill_dir: str, missing_codes: List[str], token: str) -> dict:
-    if not missing_codes:
-        return {"invoked": False, "item_codes": []}
-    copy_skill_dir = os.path.normpath(os.path.join(skill_dir, "..", "giga-resource-pack-copywriting"))
-    script_path = os.path.join(copy_skill_dir, "scripts", "generate_copywriting_rows.py")
-    if not os.path.isfile(script_path):
-        raise SystemExit(f"Designated skill runner not found: {script_path}")
+CORE_NOUNS = {"家具", "ベッド", "チェア", "テーブル", "収納", "ラック", "ソファ", "デスク", "キャビネット", "マットレス", "スツール", "棚", "机"}
+DIM_KEYWORDS = {"cm", "mm", "幅", "奥行", "高さ", "サイズ", "寸法"}
 
-    cmd = [
-        "python3",
-        script_path,
-        "--item-codes",
-        ",".join(missing_codes),
-        "--platform",
-        "mercari",
-        "--create-only-missing",
-    ]
-    env = os.environ.copy()
-    env["BASEROW_TOKEN"] = token
-    proc = subprocess.run(cmd, text=True, capture_output=True, env=env, check=False)
-    if proc.returncode != 0:
-        raise SystemExit(
-            "Failed to run designated skill `giga-resource-pack-copywriting`.\n"
-            + (proc.stderr or proc.stdout or "").strip()
-        )
-    raw = (proc.stdout or "").strip()
-    try:
-        result = json.loads(raw) if raw else {}
-    except Exception:
-        result = {"raw_output": raw}
-    result["invoked"] = True
-    return result
+
+def compute_score(
+    title: str,
+    desc: str,
+    image_count: int,
+    has_category: bool,
+    price_val: Optional[float],
+    has_sku_type: bool,
+    qty_val: Optional[float],
+    inv_status: str,
+    has_shipping_guide: bool,
+    unit_price: Optional[float],
+    discounted_price: Optional[float],
+    spec_text: str,
+    n_valid_images: int,
+) -> dict:
+    gates: List[str] = []
+    modules: Dict[str, int] = {}
+
+    if not title:
+        gates.append("BLOCKED:no_title")
+    if len(title) > 130:
+        gates.append("BLOCKED:title_too_long")
+    if not desc:
+        gates.append("BLOCKED:no_description")
+    if len(desc) > 3000:
+        gates.append("BLOCKED:description_too_long")
+    if n_valid_images == 0:
+        gates.append("BLOCKED:no_images")
+    if not price_val or price_val == 0:
+        gates.append("BLOCKED:no_price")
+
+    title_len = len(title) if title else 0
+    if not title or title_len == 0:
+        modules["title"] = 0
+    elif title_len < 80:
+        modules["title"] = 2
+    elif title_len <= 99:
+        modules["title"] = 8
+    elif title_len <= 130:
+        modules["title"] = 14
+    else:
+        modules["title"] = 0
+
+    if title and any(noun in title for noun in CORE_NOUNS):
+        modules["title"] = min(modules["title"], 14)
+        if any(dk in title for dk in DIM_KEYWORDS):
+            modules["title"] = min(modules["title"] + 2, 14)
+    elif title:
+        modules["title"] = min(modules["title"], 4)
+
+    desc_len = len(desc) if desc else 0
+    if not desc or desc_len == 0:
+        modules["description"] = 0
+    elif desc_len < 500:
+        modules["description"] = 2
+    elif desc_len <= 1199:
+        modules["description"] = 6
+    elif desc_len <= 1999:
+        modules["description"] = 10
+    elif desc_len <= 3000:
+        modules["description"] = 14
+    else:
+        modules["description"] = 0
+
+    bullet_count = desc.count("・") if desc else 0
+    if bullet_count >= 3:
+        modules["description"] = min(modules["description"] + 2, 14)
+
+    if n_valid_images == 0:
+        modules["images"] = 0
+    elif n_valid_images <= 2:
+        modules["images"] = 4
+    elif n_valid_images <= 6:
+        modules["images"] = 8
+    elif n_valid_images <= 9:
+        modules["images"] = 11
+    elif n_valid_images <= 14:
+        modules["images"] = 13
+    else:
+        modules["images"] = 14
+
+    modules["category"] = 12 if has_category else 0
+
+    if not price_val or price_val == 0:
+        modules["pricing"] = 0
+    elif price_val < 1000:
+        modules["pricing"] = 4
+    elif price_val < 5000:
+        modules["pricing"] = 8
+    else:
+        modules["pricing"] = 12
+
+    modules["variant"] = 8 if has_sku_type else 0
+
+    if not qty_val or qty_val == 0:
+        modules["inventory"] = 0
+    elif inv_status in ("Incoming Stock", "Restocked"):
+        modules["inventory"] = 6
+    else:
+        modules["inventory"] = 8
+
+    modules["shipping_guide"] = 6 if has_shipping_guide else 0
+
+    if discounted_price is not None and unit_price is not None and unit_price > 0:
+        discount_pct = (unit_price - discounted_price) / unit_price * 100
+        if discount_pct > 10:
+            modules["discount"] = 6
+        elif discount_pct > 0:
+            modules["discount"] = 4
+        else:
+            modules["discount"] = 2
+    else:
+        modules["discount"] = 2
+
+    spec_len = len(spec_text) if spec_text else 0
+    if not spec_text:
+        modules["spec_length"] = 0
+    elif spec_len < 200:
+        modules["spec_length"] = 2
+    elif spec_len <= 799:
+        modules["spec_length"] = 4
+    else:
+        modules["spec_length"] = 6
+
+    total = sum(modules.values())
+    blocked = len(gates) > 0
+
+    return {
+        "total": total,
+        "modules": modules,
+        "gates": gates,
+        "blocked": blocked,
+        "auto_open": not blocked and total >= 80,
+    }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build Mercari listing CSV with Item Code direct lookup.")
+    parser = argparse.ArgumentParser(description="Build Mercari listing CSV from Item Codes (seller-paid shipping, single table 886994).")
     parser.add_argument("--item-codes", required=True, help="Comma-separated item codes or path to newline file")
     parser.add_argument("--template-csv", required=True, help="Mercari import template CSV path")
     parser.add_argument("--output-path", default=None)
     parser.add_argument("--token", default=None)
-    parser.add_argument("--template-encoding", default="cp932")
+    parser.add_argument("--template-encoding", default="utf-8-sig")
     parser.add_argument("--output-encoding", default="utf-8-sig")
-    parser.add_argument("--shipping-guide-url", required=True)
-    parser.add_argument("--product-info-table-id", type=int, default=912520)
+    parser.add_argument("--shipping-guide-url", required=True, help="URL of shipping fee guide image to append")
     parser.add_argument("--products-table-id", type=int, default=886994)
-    parser.add_argument("--copy-table-id", type=int, default=912536)
-    parser.add_argument("--shipping-table-id", type=int, default=914491)
-    parser.add_argument("--auto-run-copywriting-skill", action="store_true", default=True)
-    parser.add_argument("--no-auto-run-copywriting-skill", dest="auto_run_copywriting_skill", action="store_false")
-    parser.add_argument("--fail-on-missing-copy", action="store_true", default=True)
-    parser.add_argument("--allow-missing-copy", dest="fail_on_missing_copy", action="store_false")
+    parser.add_argument("--description-prefix", default=DEFAULT_DESC_PREFIX)
+    parser.add_argument("--description-footer", default="")
+    parser.add_argument("--score", action="store_true", help="Enable 10-module quality scoring")
+    parser.add_argument("--auto-open-qualified", action="store_true", help="Set 商品ステータス=2 for score >= 80 (requires --score)")
+    parser.add_argument("--baserow-workers", type=int, default=10, help="Number of parallel Baserow read workers (default: 10)")
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    skill_dir = os.path.dirname(script_dir)
-    load_dotenv(os.path.join(skill_dir, ".env"))
-    load_dotenv(os.path.join(skill_dir, ".env.local"))
+    load_dotenv(os.path.join(script_dir, ".env"))
+    load_dotenv(os.path.join(script_dir, ".env.local"))
+    load_dotenv(os.path.join(os.path.dirname(script_dir), ".env"))
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), ".env"))
+    # Also check CWD for .env (project root search)
+    load_dotenv(os.path.join(os.getcwd(), ".env"))
+    load_dotenv(os.path.join(os.getcwd(), ".env.local"))
 
     token = resolve_token(args.token)
     item_codes = parse_item_codes(args.item_codes)
     if not item_codes:
         raise SystemExit("No item codes provided")
 
-    info_field_id = resolve_field_id(token, args.product_info_table_id, "Item Code")
-    products_field_id = resolve_field_id(token, args.products_table_id, "item code")
-    copy_field_id = resolve_field_id(token, args.copy_table_id, "Item Code")
-
-    info_rows = fetch_rows_by_equal_filter(token, args.product_info_table_id, f"field_{info_field_id}", item_codes)
-    products_rows = fetch_rows_by_equal_filter(token, args.products_table_id, f"field_{products_field_id}", item_codes)
-    copy_rows = fetch_rows_by_equal_filter(token, args.copy_table_id, f"field_{copy_field_id}", item_codes)
-    pre_missing_copy = missing_copy_codes(item_codes, copy_rows)
-    copy_skill_run = {"invoked": False, "item_codes": []}
-    if pre_missing_copy and args.auto_run_copywriting_skill:
-        copy_skill_run = run_designated_copywriting_skill(skill_dir, pre_missing_copy, token)
-        copy_rows = fetch_rows_by_equal_filter(token, args.copy_table_id, f"field_{copy_field_id}", item_codes)
-    shipping_rows = fetch_all_rows(token, args.shipping_table_id)
-    info_map = {str_value(r.get("Item Code")): r for r in info_rows}
-    products_map = {str_value(r.get("item code")): r for r in products_rows}
-
     fieldnames, template_first = template_fieldnames(args.template_csv, args.template_encoding)
     if not fieldnames:
         raise SystemExit("Template CSV has no header")
 
+    session = requests.Session()
+
+    sys.stderr.write(f"Fetching {len(item_codes)} codes from table {args.products_table_id} with {args.baserow_workers} workers...\n")
+
+    products: List[dict] = []
+    batches = [[c] for c in item_codes]
+
+    with ThreadPoolExecutor(max_workers=args.baserow_workers) as executor:
+
+        def fetch_one(code: str) -> List[dict]:
+            return fetch_rows_by_equal_filter(session, token, args.products_table_id, "field_7670234", [code])
+
+        fut_map = {executor.submit(fetch_one, b[0]): i for i, b in enumerate(batches)}
+        for f in as_completed(fut_map):
+            try:
+                products.extend(f.result())
+            except Exception as exc:
+                sys.stderr.write(f"  Batch {fut_map[f]} failed: {exc}\n")
+
+    products_map = {str_value(r.get("item code")): r for r in products}
+    found_codes = set(products_map.keys())
+    missing_codes = sorted(set(item_codes) - found_codes)
+
+    if missing_codes:
+        missing_path = os.path.join(
+            os.path.dirname(args.output_path or "."),
+            f"missing_products_{dt.date.today().isoformat()}.csv",
+        )
+        with open(missing_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["item code"])
+            for c in missing_codes:
+                writer.writerow([c])
+
+    present_codes = [c for c in item_codes if c in found_codes]
+    sys.stderr.write(f"Found {len(present_codes)} codes in 886994, {len(missing_codes)} missing\n")
+
+    # Overlap GigaB2B image fetch with main processing
+    giga_future = None
+    if present_codes:
+        giga_batches = [present_codes[i:i + 50] for i in range(0, len(present_codes), 50)]
+
+        def fetch_all_giga():
+            result: Dict[str, List[str]] = {}
+            for chunk in giga_batches:
+                try:
+                    result.update(fetch_giga_images(chunk))
+                except Exception:
+                    pass
+            return result
+
+        giga_future = ThreadPoolExecutor(max_workers=1).submit(fetch_all_giga)
+
+    sys.stderr.write(f"Building {len(present_codes)} CSV rows...\n")
+
+    # Wait for GigaB2B image fetch to complete
+    giga_image_map: Dict[str, List[str]] = {}
+    if giga_future is not None:
+        try:
+            giga_image_map = giga_future.result()
+            sys.stderr.write(f"GigaB2B images fetched for {len(giga_image_map)} codes\n")
+        except Exception as exc:
+            sys.stderr.write(f"GigaB2B fetch failed: {exc}\n")
+
     out_rows: List[dict] = []
-    missing_copy: List[str] = []
     missing_required: List[str] = []
     missing_main_color: List[str] = []
+    missing_spec: List[str] = []
+    score_records: List[dict] = []
 
-    for code in item_codes:
-        info = info_map.get(code)
+    for idx, code in enumerate(present_codes):
         prod = products_map.get(code)
-        copy_row = best_copy_row(copy_rows, code)
-        if not copy_row:
-            missing_copy.append(code)
+        if not prod:
+            continue
+        if (idx + 1) % 100 == 0:
+            sys.stderr.write(f"  Row {idx + 1}/{len(present_codes)}\n")
 
         row = {k: "" for k in fieldnames}
-        # keep existing template flag pattern when available
         for k, v in template_first.items():
             if k.startswith("商品画像更新フラグ_") or k.startswith("商品画像登録有無_"):
                 row[k] = v
 
-        title, desc = get_copy_text(copy_row)
-        if prod:
-            title = apply_title_prefix(title, prod)
+        title = str_value(prod.get("Product Name"))
+        title = apply_title_prefix(title, prod)
+        desc = build_description(prod, args.description_prefix, args.description_footer)
 
         set_if_exists(row, "商品名", title)
         set_if_exists(row, "商品説明", desc)
+
+        if not title or not desc:
+            missing_spec.append(code)
+
         set_if_exists(row, "SKU1_商品管理コード", code)
 
-        price = str_value((prod or {}).get("Mercari ref pricing"))
-        qty = str_value((prod or {}).get("Mercari Qty"))
+        qty = str_value(prod.get("Mercari Qty"))
+        price = str_value(prod.get("Mercari Effective Pricing (incl. shipping)"))
         set_if_exists(row, "販売価格", price)
         set_if_exists(row, "SKU1_在庫数", qty)
         set_if_exists(row, "SKU1_現在の在庫数", qty)
-        sku1_type = sku1_type_from_main_color(
-            (prod or {}).get("Main Color (JP)"),
-        )
-        set_if_exists(row, "SKU1_種類", sku1_type)
-        if not sku1_type:
+
+        main_color = str_value(prod.get("Representative_Color_JA"))
+        sku_type = main_color if is_usable_main_color(main_color) else ""
+        set_if_exists(row, "SKU1_種類", sku_type)
+        if not main_color or not is_usable_main_color(main_color):
             missing_main_color.append(code)
 
-        category = str_value((prod or {}).get("Mercari category ID") or (info or {}).get("Mercari category ID"))
+        category = str_value(prod.get("Mercari category ID"))
         set_if_exists(row, "カテゴリID", category)
-
-        fee = num_value((prod or {}).get("Unit Fulfillment Fee (Drop Shipping)"))
-        shipping_id = choose_shipping_id(shipping_rows, fee)
-        set_if_exists(row, "送料ID", shipping_id)
 
         set_if_exists(row, "商品の状態", "1")
         set_if_exists(row, "配送方法", "1")
         set_if_exists(row, "発送元の地域", "jp13")
-        # Keep new listings unopened for manual review; the upload layer maps
-        # `1` to the closed state.
+        set_if_exists(row, "配送料の負担", "1")
+        set_if_exists(row, "送料ID", "")
         set_if_exists(row, "商品ステータス", "1")
-        set_if_exists(row, "配送料の負担", "2")
 
-        dispatch_days = "1"
-        if qty == "5":
-            dispatch_days = "5"
-        set_if_exists(row, "発送までの日数", dispatch_days)
-
-        images = get_product_image_urls(info or {})
-        if len(images) < 20:
-            images = images + [args.shipping_guide_url]
+        inv_status = str_value(prod.get("Inventory Status"))
+        if inv_status in ("Incoming Stock", "Restocked"):
+            set_if_exists(row, "発送までの日数", "3")
         else:
-            images = images[:19] + [args.shipping_guide_url]
-        images = images[:20]
+            set_if_exists(row, "発送までの日数", "1")
 
-        for idx, u in enumerate(images, start=1):
-            set_if_exists(row, f"商品画像名_{idx}", u)
+        giga_imgs = giga_image_map.get(code, [])
+        images = get_product_images(prod, giga_imgs, args.shipping_guide_url)
 
-        # required checks
-        required = ["商品名", "商品説明", "販売価格", "カテゴリID", "送料ID"]
+        for img_idx, u in enumerate(images, start=1):
+            set_if_exists(row, f"商品画像名_{img_idx}", u)
+
+        required = ["商品名", "商品説明", "販売価格", "カテゴリID"]
         miss = [k for k in required if (k in row and not str_value(row.get(k)))]
         if miss:
             missing_required.append(f"{code}: {','.join(miss)}")
 
-        out_rows.append(row)
-
-    if missing_copy and args.fail_on_missing_copy:
-        missing_str = ",".join(sorted(set(missing_copy)))
-        if copy_skill_run.get("invoked"):
-            raise SystemExit(
-                "Missing Mercari copywriting rows after running designated skill "
-                "`giga-resource-pack-copywriting`: "
-                + missing_str
-                + ". Skill output: "
-                + json.dumps(copy_skill_run, ensure_ascii=False)
+        if args.score:
+            score = compute_score(
+                title=title,
+                desc=desc,
+                image_count=len(images),
+                has_category=bool(category),
+                price_val=num_value(price),
+                has_sku_type=bool(sku_type),
+                qty_val=num_value(qty),
+                inv_status=inv_status,
+                has_shipping_guide=any(args.shipping_guide_url in u for u in images),
+                unit_price=num_value(prod.get("Unit Price")),
+                discounted_price=num_value(prod.get("Discounted Unit Price")),
+                spec_text=str_value(prod.get("Product Specification")),
+                n_valid_images=len([u for u in images if args.shipping_guide_url not in u]),
             )
-        raise SystemExit(
-            "Missing Mercari copywriting rows for Item Code(s): "
-            + missing_str
-            + ". Please run designated skill `giga-resource-pack-copywriting` first, then rerun this CSV skill."
-        )
+            score_records.append({"item_code": code, **score})
+            if args.auto_open_qualified and score["auto_open"]:
+                set_if_exists(row, "商品ステータス", "2")
+
+        out_rows.append(row)
 
     out_path = args.output_path or os.path.join(os.getcwd(), f"mercari_listing_{dt.date.today().isoformat()}.csv")
     with open(out_path, "w", encoding=args.output_encoding, newline="") as f:
@@ -539,26 +657,40 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(out_rows)
 
-    print(
-        json.dumps(
-            {
-                "output_path": out_path,
-                "item_codes": item_codes,
-                "rows_written": len(out_rows),
-                "fetched": {
-                    "product_info_rows": len(info_rows),
-                    "products_rows": len(products_rows),
-                    "copy_rows": len(copy_rows),
-                },
-                "copywriting_skill_run": copy_skill_run,
-                "missing_copy": missing_copy,
-                "missing_required": missing_required,
-                "missing_main_color_for_sku1_type": sorted(set(missing_main_color)),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    report: dict = {
+        "output_path": out_path,
+        "item_codes_total": len(item_codes),
+        "found_in_886994": len(present_codes),
+        "missing_from_886994": missing_codes,
+        "rows_written": len(out_rows),
+        "missing_required_fields": missing_required,
+        "missing_main_color": sorted(set(missing_main_color)),
+        "missing_spec": sorted(set(missing_spec)),
+    }
+
+    if args.score and score_records:
+        score_out = os.path.join(os.path.dirname(out_path), f"quality_scores_{dt.date.today().isoformat()}.csv")
+        score_keys = ["item_code", "total", "blocked", "auto_open", "gates"] + list(score_records[0].get("modules", {}).keys())
+        with open(score_out, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=score_keys, extrasaction="ignore", lineterminator="\r\n")
+            writer.writeheader()
+            for sr in score_records:
+                flat = {"item_code": sr["item_code"], "total": sr["total"], "blocked": sr["blocked"], "auto_open": sr["auto_open"], "gates": ";".join(sr["gates"])}
+                flat.update(sr.get("modules", {}))
+                writer.writerow(flat)
+        report["score_output_path"] = score_out
+        report["score_distribution"] = {}
+        for sr in score_records:
+            bucket = f"{sr['total'] // 10 * 10}-{sr['total'] // 10 * 10 + 9}"
+            report["score_distribution"][bucket] = report["score_distribution"].get(bucket, 0) + 1
+        report["score_auto_open_eligible"] = sum(1 for sr in score_records if sr["auto_open"])
+        report["score_blocked"] = sum(1 for sr in score_records if sr["blocked"])
+        report["score_gates"] = {}
+        for sr in score_records:
+            for g in sr["gates"]:
+                report["score_gates"][g] = report["score_gates"].get(g, 0) + 1
+
+    print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
