@@ -1,4 +1,0 @@
-interface:
-  display_name: "Mercari Listing"
-  short_description: "Build Mercari listing CSVs from item codes and Baserow data."
-  default_prompt: "Use $mercari-listing to build the Mercari CSV from the provided Item Codes."

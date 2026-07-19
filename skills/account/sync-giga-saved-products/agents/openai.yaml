@@ -1,4 +1,0 @@
-interface:
-  display_name: "Sync Giga Saved Products"
-  short_description: "Sync GigaB2B saved products into Baserow 886994 with documented Baserow and GigaB2B API access."
-  default_prompt: "Use $sync-giga-saved-products to sync GigaB2B saved products into Baserow table 886994 from explicit Item Codes or from the last 30 days of newly saved products, using the skill's built-in Baserow and GigaB2B access instructions."

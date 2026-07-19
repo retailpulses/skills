@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Dict, List, Optional, Set, Tuple
 
+import requests
+
 from PIL import Image, ImageOps
 from supabase_db import SupabaseDB, resolve_credentials
 
@@ -211,9 +213,11 @@ def collect_all_image_refs(rows: List[dict], item_code_field: str, image_field: 
     refs: List[ImageRef] = []
     for row in rows:
         item_code = str(row.get(item_code_field) or "").strip()
-        row_id = row.get("id")
-        if not item_code or row_id is None:
+        if not item_code:
             continue
+        # Generate synthetic row_id from item_code hash when view lacks
+        # natural primary key column (e.g. baserow_886994_compat_vw)
+        row_id = row.get("id") or hash(item_code) % (2 ** 31)
 
         json_raw = row.get(image_field)
         if json_raw:

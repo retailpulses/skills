@@ -1,6 +1,0 @@
-interface:
-  display_name: "GigaB2B Workflow"
-  short_description: "Query GigaB2B product, price, shipping, and saved-products data, and sync saved products into Baserow table 886994 using HMAC-SHA256 signed requests."
-  default_prompt: "Use $gigab2b-workflow to query GigaB2B product, price, shipping, or saved-product data with signed OpenAPI requests, or to sync GigaB2B saved products into Baserow table 886994 from explicit Item Codes or from the last 30 days of newly saved products."
-policy:
-  allow_implicit_invocation: true

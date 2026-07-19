@@ -1,13 +1,13 @@
 #!/usr/bin/env node
+/** Query and update Mercari inquiry records via Supabase PostgREST.
+
+Replaces Baserow API with Supabase PostgREST.
+Target: mercari_inquiries table (domain: product_catalog, owner: retailpulses/RPagentOS).
+*/
 
 import fs from "node:fs";
 import path from "node:path";
 
-// TODO(2026-07-18): Migrate from Baserow API to Supabase PostgREST.
-// Update DEFAULT_BASE_URL to SUPABASE_URL + /rest/v1/mercari_inquiries.
-// See docs/BASEROW_TO_SUPABASE_MIGRATION.md for the migration plan.
-const DEFAULT_BASE_URL = "https://api.baserow.io";  // DEPRECATED: migrate to Supabase
-const DEFAULT_TABLE_ID = "886975";  // DEPRECATED: use mercari_inquiries table
 const DEFAULT_ENV_FILE = "/Users/user/Documents/Retailpulses/.env";
 const PAGE_SIZE = 200;
 
@@ -73,94 +73,80 @@ function selectValue(value) {
 function redactRow(row) {
   return {
     id: row.id,
-    inquiryDate: row["Inquiry Date"],
-    status: selectValue(row.Status),
-    account: selectValue(row.Account),
-    inquiryType: selectValue(row["Inquiry Type"]),
-    url: row.URL,
-    productName: row["Product Name"],
-    itemCode: row["Item code"],
-    units: row.Units,
-    quantityAvailable: row["Qty Available"],
-    lastCustomerMessage: row["Last Custom Message"],
-    messageLog: row["Message log"],
-    inquiryBody: row["Inquiry body"],
-    replyStrategy: row["Reply strategy"],
-    draftReply: row["Draft reply"],
-    followUpStrategy: row["Follow-up strategy"],
-    followUpMessage: row["Follow-up msg"],
-    followUpDate: row["Follow-up Date"],
-    orderId: row.OrderID,
-    orderDate: row["Order Date"],
+    inquiryDate: row.last_message_at,
+    status: row.status,
+    shop: row.shop,
+    customerName: row.customer_name,
+    itemCode: row.item_code,
+    notes: row.notes,
+    followUpSentAt: row.follow_up_sent_at,
+    followUpDate: row.follow_up_sent_at,
   };
 }
 
 const { command, options } = parseArgs(process.argv.slice(2));
 if (!command || options.help) {
   console.log(`Usage:
-  node baserow_inquiries.mjs schema [--output FILE]
-  node baserow_inquiries.mjs query [--status Answered] [--start YYYY-MM-DD] [--end YYYY-MM-DD] --output FILE
-  node baserow_inquiries.mjs get --id ROW_ID --output FILE
-  node baserow_inquiries.mjs batch-status --input FILE [--dry-run]
-  node baserow_inquiries.mjs verify-status --input FILE [--output FILE]
+  node supabase_inquiries.mjs query [--status <status>] [--start YYYY-MM-DD] [--end YYYY-MM-DD] --output FILE
+  node supabase_inquiries.mjs get --id ROW_ID --output FILE
+  node supabase_inquiries.mjs batch-status --input FILE [--dry-run]
+  node supabase_inquiries.mjs verify-status --input FILE [--output FILE]
 
-Environment: BASEROW_TOKEN, BASEROW_BASE_URL, BASEROW_INQUIRIES_TABLE_ID.
+Environment: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 The default query window is N-5 through N-2 inclusive in Asia/Tokyo.`);
   process.exit(command ? 0 : 2);
 }
 
-const envFile = options["env-file"] || process.env.BASEROW_ENV_FILE || DEFAULT_ENV_FILE;
+const envFile = options["env-file"] || process.env.SUPABASE_ENV_FILE || DEFAULT_ENV_FILE;
 const fileEnv = loadEnvFile(envFile);
-const token = process.env.BASEROW_TOKEN || process.env.BASEROW_API_TOKEN || fileEnv.BASEROW_TOKEN || fileEnv.BASEROW_API_TOKEN;
-const baseUrl = (process.env.BASEROW_BASE_URL || fileEnv.BASEROW_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
-const tableId = process.env.BASEROW_INQUIRIES_TABLE_ID || fileEnv.BASEROW_INQUIRIES_TABLE_ID || DEFAULT_TABLE_ID;
-if (!token) throw new Error("Missing BASEROW_TOKEN");
+const supabaseUrl = (process.env.SUPABASE_URL || fileEnv.SUPABASE_URL || "").replace(/\/$/, "");
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || fileEnv.SUPABASE_SERVICE_ROLE_KEY || "";
+if (!supabaseUrl || !supabaseKey) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 
-async function api(relativeUrl, init = {}) {
-  const response = await fetch(`${baseUrl}${relativeUrl}`, {
+const TABLE = "mercari_inquiries";
+const BASE = `${supabaseUrl}/rest/v1`;
+
+function headers() {
+  return {
+    apikey: supabaseKey,
+    Authorization: `Bearer ${supabaseKey}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+async function api(path, init = {}) {
+  const response = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      Authorization: `Token ${token}`,
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
+    headers: { ...headers(), ...(init.headers || {}) },
   });
   if (!response.ok) {
     const body = (await response.text()).slice(0, 800);
-    throw new Error(`Baserow ${response.status} ${response.statusText}: ${body}`);
+    throw new Error(`Supabase ${response.status} ${response.statusText}: ${body}`);
   }
-  return response.status === 204 ? null : response.json();
+  if (response.status === 204) return null;
+  const text = await response.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
-async function schema() {
-  return api(`/api/database/fields/table/${tableId}/`);
-}
-
-function requiredField(fields, name) {
-  const field = fields.find((item) => item.name === name);
-  if (!field) throw new Error(`Required Baserow field is missing: ${name}`);
-  return field;
-}
-
-function selectOption(fields, fieldName, value) {
-  const field = requiredField(fields, fieldName);
-  const option = (field.select_options || []).find((item) => item.value === value);
-  if (!option) throw new Error(`Unknown ${fieldName} option: ${value}`);
-  return option;
-}
-
-async function listRows(status) {
-  const fields = await schema();
-  const statusOption = status ? selectOption(fields, "Status", status) : null;
+async function listRows(status, startDate, endDate) {
   const rows = [];
-  let page = 1;
+  let offset = 0;
   while (true) {
-    const params = new URLSearchParams({ user_field_names: "true", size: String(PAGE_SIZE), page: String(page) });
-    if (statusOption) params.set(`filter__field_${requiredField(fields, "Status").id}__single_select_equal`, String(statusOption.id));
-    const payload = await api(`/api/database/rows/table/${tableId}/?${params}`);
-    rows.push(...payload.results);
-    if (!payload.next) break;
-    page += 1;
+    let filter = "";
+    const filters = [];
+    if (status) filters.push(`status=eq.${encodeURIComponent(status)}`);
+    if (startDate) filters.push(`last_message_at=gte.${encodeURIComponent(startDate)}`);
+    if (endDate) filters.push(`last_message_at=lte.${encodeURIComponent(endDate)}`);
+    if (filters.length) filter = "&" + filters.join("&");
+
+    const path = `/${TABLE}?select=*&limit=${PAGE_SIZE}&offset=${offset}${filter}`;
+    const batch = await api(path);
+    if (!batch || !batch.length) break;
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
   }
   return rows;
 }
@@ -170,26 +156,13 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-if (command === "schema") {
-  const fields = await schema();
-  const safe = fields.map(({ id, name, type, select_options: selectOptions }) => ({
-    id,
-    name,
-    type,
-    options: selectOptions?.map(({ id: optionId, value }) => ({ id: optionId, value })),
-  }));
-  if (options.output) writeJson(options.output, safe);
-  else console.log(JSON.stringify(safe, null, 2));
-} else if (command === "query") {
+if (command === "query") {
   if (!options.output) throw new Error("query requires --output FILE to keep customer data out of terminal output");
   const start = options.start || jstDate(-5);
   const end = options.end || jstDate(-2);
-  const status = options.status || "Answered";
+  const status = options.status || "open";
   if (start > end) throw new Error(`Invalid date range: ${start} is after ${end}`);
-  const rows = (await listRows(status)).filter((row) => {
-    const date = dateInJst(row["Inquiry Date"]);
-    return date && date >= start && date <= end;
-  });
+  const rows = await listRows(status, start, end);
   const output = {
     generatedAt: new Date().toISOString(),
     timezone: "Asia/Tokyo",
@@ -203,33 +176,29 @@ if (command === "schema") {
   console.log(`Saved ${rows.length} ${status} inquiries for ${start} through ${end} JST to ${options.output}`);
 } else if (command === "get") {
   if (!options.id || !options.output) throw new Error("get requires --id ROW_ID --output FILE");
-  const row = await api(`/api/database/rows/table/${tableId}/${Number(options.id)}/?user_field_names=true`);
-  writeJson(options.output, redactRow(row));
+  const rows = await api(`/${TABLE}?id=eq.${Number(options.id)}&limit=1`);
+  if (!rows || !rows.length) throw new Error(`Inquiry ${options.id} not found`);
+  writeJson(options.output, redactRow(rows[0]));
   console.log(`Saved inquiry ${Number(options.id)} to ${options.output}`);
 } else if (command === "batch-status") {
   if (!options.input) throw new Error("batch-status requires --input FILE");
   const actions = JSON.parse(fs.readFileSync(options.input, "utf8"));
   if (!Array.isArray(actions) || actions.length === 0) throw new Error("Status input must be a non-empty array");
-  const fields = await schema();
-  const followUpField = fields.find((field) => field.name === "Follow-up Date");
   const now = new Date().toISOString();
-  const items = actions.map((action) => {
-    if (!Number.isInteger(Number(action.id))) throw new Error(`Invalid row id: ${action.id}`);
-    const statusOption = selectOption(fields, "Status", action.status);
-    const item = { id: Number(action.id), Status: statusOption.id };
-    if (action.status === "Followed-up" && followUpField) item["Follow-up Date"] = action.followUpDate || now;
-    return item;
-  });
+
   if (options["dry-run"]) {
-    console.log(`Dry run: validated ${items.length} status updates; no Baserow rows changed.`);
+    console.log(`Dry run: validated ${actions.length} status updates; no rows changed.`);
   } else {
-    for (let i = 0; i < items.length; i += 100) {
-      await api(`/api/database/rows/table/${tableId}/batch/?user_field_names=true`, {
+    for (const action of actions) {
+      const payload = { status: action.status };
+      if (action.status === "Followed-up") payload.follow_up_sent_at = action.followUpDate || now;
+      await api(`/${TABLE}?id=eq.${Number(action.id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ items: items.slice(i, i + 100) }),
+        body: JSON.stringify(payload),
+        headers: { Prefer: "return=representation" },
       });
     }
-    console.log(`Updated ${items.length} Baserow inquiry statuses. Run verify-status with the same input.`);
+    console.log(`Updated ${actions.length} inquiry statuses. Run verify-status with the same input.`);
   }
 } else if (command === "verify-status") {
   if (!options.input) throw new Error("verify-status requires --input FILE");
@@ -237,13 +206,13 @@ if (command === "schema") {
   if (!Array.isArray(expected) || expected.length === 0) throw new Error("Status input must be a non-empty array");
   const results = [];
   for (const action of expected) {
-    const row = await api(`/api/database/rows/table/${tableId}/${Number(action.id)}/?user_field_names=true`);
-    const actual = selectValue(row.Status);
+    const rows = await api(`/${TABLE}?id=eq.${Number(action.id)}&limit=1`);
+    const actual = rows?.[0]?.status ?? "unknown";
     results.push({ id: Number(action.id), expected: action.status, actual, verified: actual === action.status });
   }
   const report = { checkedAt: new Date().toISOString(), allVerified: results.every((item) => item.verified), results };
   if (options.output) writeJson(options.output, report);
-  console.log(`Verified ${results.filter((item) => item.verified).length}/${results.length} Baserow statuses.`);
+  console.log(`Verified ${results.filter((item) => item.verified).length}/${results.length} statuses.`);
   if (!report.allVerified) process.exitCode = 1;
 } else {
   throw new Error(`Unknown command: ${command}`);

@@ -1,34 +1,43 @@
 #!/usr/bin/env python3
-# TODO(2026-07-18): Migrate from Baserow API to Supabase PostgREST.
-# This script still uses api.baserow.io — update to SUPABASE_URL/rest/v1/.
-# See docs/BASEROW_TO_SUPABASE_MIGRATION.md for the migration plan.
+"""Build Amazon inventory flatfile from Supabase amazon_listings table.
+
+Replaces Baserow API with Supabase PostgREST.
+Reads from amazon_listings (domain: product_catalog, owner: retailpulses/RPagentOS).
+"""
 import argparse
 import csv
 import json
+import os
 import urllib.request
 
 from openpyxl import load_workbook
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
-def fetch_rows(token, table_id):
+
+def fetch_rows(table_name, limit=200):
+    """Fetch all rows from a Supabase table via PostgREST."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SystemExit("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
     rows = []
-    page = 1
-    headers = {"Authorization": f"Token {token}"}
+    offset = 0
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Accept": "application/json",
+    }
     while True:
-        url = (
-            f"https://api.baserow.io/api/database/rows/table/{table_id}/"
-            f"?user_field_names=true&size=200&page={page}"
-        )
+        url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/{table_name}?select=*&limit={limit}&offset={offset}"
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode())
-        batch = data.get("results", [])
+            batch = json.loads(resp.read().decode())
         if not batch:
             break
-        rows.extend(batch)
-        if len(batch) < 200:
+        rows.extend(batch if isinstance(batch, list) else [batch])
+        if len(batch) < limit:
             break
-        page += 1
+        offset += limit
     return rows
 
 
@@ -51,16 +60,20 @@ def normalized_order(row):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--token", required=True)
-    parser.add_argument("--amazon-table-id", type=int, required=True)
+    parser.add_argument("--supabase-url", default=SUPABASE_URL)
+    parser.add_argument("--supabase-key", default=SUPABASE_KEY)
     parser.add_argument("--template-path", required=True)
     parser.add_argument("--output-path", required=True)
-    parser.add_argument("--sku-field", default="SKU")
+    parser.add_argument("--sku-field", default="seller_sku")
     parser.add_argument(
-        "--fulfillment-field", default="フルフィルメントチャネルコード (JP)"
+        "--fulfillment-field", default="fulfillment_channel"
     )
-    parser.add_argument("--qty-field", default="在庫数 (JP)")
+    parser.add_argument("--qty-field", default="quantity")
     args = parser.parse_args()
+
+    global SUPABASE_URL, SUPABASE_KEY
+    SUPABASE_URL = args.supabase_url or SUPABASE_URL
+    SUPABASE_KEY = args.supabase_key or SUPABASE_KEY
 
     wb = load_workbook(args.template_path, read_only=True, data_only=False, keep_vba=True)
     ws = wb["テンプレート"]
@@ -74,7 +87,7 @@ def main():
             ]
         )
 
-    amazon_rows = fetch_rows(args.token, args.amazon_table_id)
+    amazon_rows = fetch_rows("amazon_listings")
     amazon_rows.sort(key=normalized_order)
 
     written = 0

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Mercari Timesale CSV"
-  short_description: "Build Mercari Shops timesale CSV files from scoped Baserow timesale rows, ShopID filtering, and price validation. The CSV is named mercari_timesale_shop{1-4}_{timestamp}_{count}listings.csv."
-  default_prompt: "Use $mercari-timesale-csv to generate a Mercari timesale CSV from a shop/product scope and time window. Apply price validation (min of Ref Timesale price or 95% of current price, rounded down), ShopID filtering, and boundary checks against stored min/max sale prices."
-
-policy:
-  allow_implicit_invocation: true
