@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// TODO(2026-07-18): Migrate from Baserow API to Supabase PostgREST.
+// Update to use SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+// See docs/BASEROW_TO_SUPABASE_MIGRATION.md for the migration plan.
 
 import fs from "node:fs";
 import path from "node:path";

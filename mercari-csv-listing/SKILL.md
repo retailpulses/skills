@@ -1,36 +1,36 @@
 ---
 name: mercari-csv-listing
-description: Build a Mercari listing CSV from Item Codes or a GigaB2B Excel file. Listing strategy uses seller-paid shipping (shipping included in price). All data sourced from Baserow table 886994 (Products). Output is a CSV for manual upload via Mercari admin panel.
+description: Build a Mercari listing CSV from Item Codes or a GigaB2B Excel file. Listing strategy uses seller-paid shipping (shipping included in price). Data sourced from Supabase baserow_886994_compat_vw (replaces Baserow 886994). Output is a CSV for manual upload via Mercari admin panel.
 ---
 
 # Mercari Listing CSV
 
 Use when the input is Item Codes or a GigaB2B Excel file and the output is a Mercari listing CSV.
 
-**Listing strategy**: Seller-paid shipping (shipping included in listed price). All data from Baserow table 886994 (Products).
+**Listing strategy**: Seller-paid shipping (shipping included in listed price). Data from Supabase `baserow_886994_compat_vw` (product_variants + product_commercials).
 
 ## Pipeline
 
-Each key field domain has its own preparation script. The build script is a final CSV assembler that reads already-clean data from Baserow.
+Each key field domain has its own preparation script. The build script is a final CSV assembler that reads already-clean data from Supabase.
 
 ```
 Step 1: prepare_categories.py
   ├─ Reads product names → keyword-matches category IDs
   ├─ Maps Shops-invalid leaf categories → "その他" variants
-  ├─ Writes → Baserow.Mercari category ID
+  ├─ Writes → Supabase.Mercari category ID
   ↓
 Step 2: prepare_colors.py
   ├─ Falls back: Representative_Color_JA empty? → use Main Color → EN→JA translation
-  ├─ Writes → Baserow.Representative_Color_JA
+  ├─ Writes → Supabase.Representative_Color_JA
   ↓
 Step 3: prepare_oversize_images.py
-  ├─ Reads Image URLs JSON from Baserow
+  ├─ Reads Image URLs JSON from Supabase
   ├─ HEAD-checks each URL, downloads >10MB images
   ├─ Resizes to 1500x1500 progressive JPEG, uploads to R2
-  ├─ Writes updated R2 URLs → Baserow.Image URLs JSON
+  ├─ Writes updated R2 URLs → Supabase.Image URLs JSON
   ↓
 Step 4: build_mercari_listing_csv.py
-  ├─ Reads clean Baserow data → assembles CSV
+  ├─ Reads clean Supabase data → assembles CSV
   ├─ Applies titles, descriptions, scoring
   ↓
 Step 5: upload_mercari_csv_to_shops.py
@@ -42,16 +42,16 @@ Step 5: upload_mercari_csv_to_shops.py
 1. **Prepare categories** — `python3 scripts/prepare_categories.py --item-codes <file> --token <token> [--dry-run]`
    - Matches product names to Mercari Shops category IDs via keyword rules
    - Falls back to "その他" for 7 known Shops-invalid leaf categories
-   - Writes `Mercari category ID` to Baserow
+   - Writes `Mercari category ID` to Supabase
 2. **Prepare colors** — `python3 scripts/prepare_colors.py --item-codes <file> --token <token> [--dry-run]`
    - Translates `Main Color` (English) → `Representative_Color_JA` (Japanese) for products missing it
    - Uses static EN→JA dict (32 entries) with compound color support (`white+black → ホワイト+ブラック`)
 3. **Prepare images** — `python3 scripts/prepare_oversize_images_for_mercari.py --item-codes <file> --r2-public-base-url <url> --token <token> [--dry-run]`
-   - Reads `Image URLs JSON` from Baserow, HEAD-checks each URL
+   - Reads `Image URLs JSON` from Supabase, HEAD-checks each URL
    - Downloads oversized images (>10MB), resizes to 1500×1500 progressive JPEG
    - Uploads to R2 bucket `resize-product-images`, writes R2 URLs back to `Image URLs JSON`
 4. **Build CSV** — `python3 scripts/build_mercari_listing_csv.py --item-codes <file> --template-csv <template> --shipping-guide-url <url> --token <token> [--score]`
-   - Reads clean Baserow data, assembles CSV rows, applies scoring
+   - Reads clean Supabase data, assembles CSV rows, applies scoring
 5. **Upload to Shops** — `python3 scripts/upload_mercari_csv_to_shops.py --csv <output.csv> [--shops shop4] [--mode ssh]`
     - Uploads CSV to Mercari Shops via SSH/VPS
 
@@ -59,25 +59,26 @@ Step 5: upload_mercari_csv_to_shops.py
 
 ## Prerequisites
 
-- `BASEROW_TOKEN` in env or `.env`.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in env or `.env`.
 - `GIGA_CLIENT_ID` and `GIGA_CLIENT_SECRET` for GigaB2B image fetching.
 - `R2_PUBLIC_BASE_URL` and `wrangler` CLI for image resize/upload.
 - Shipping-fee guide image URL.
 - `DEEPSEEK_API_KEY` (optional, for `--use-deepseek-desc`).
+- `supabase-py` (pip install supabase) — see `requirements.txt`.
 
 ## Data Source
 
-Single table: **886994** (Products). No other Baserow tables are used.
+Supabase **`baserow_886994_compat_vw`** — a compatibility view joining `product_variants` + `product_commercials` + `product_mercari_qty_vw`. Exposes the same field names as the old Baserow 886994 table.
 
-## Baserow Access
+## Supabase Access
 
-- `Authorization: Token <token>`
-- `user_field_names=true`
-- `size=200&page=<n>` for pagination
+- Uses `supabase-py` Python client with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
+- Optional psycopg2 pooler mode for IPv4 access (set `SUPABASE_USE_POOLER=1`)
+- Shared module: `scripts/supabase_db.py` — provides `SupabaseDB` class with Baserow-style field name compatibility
 
 ## Title Rules
 
-Source: 886994.`Product Name`.
+Source: Supabase.`Product Name`.
 
 1. Strip `元SKU` / `元sku` / `元SKU：` patterns from anywhere in the title.
 2. Strip leading ASCII SKU codes: `re.sub(r"^[A-Z0-9-]+\s*", "", title)`.
@@ -87,7 +88,7 @@ Source: 886994.`Product Name`.
 
 ## Description Rules
 
-Source: 886994.`Product Specification`.
+Source: Supabase.`Product Specification`.
 
 Structure:
 ```
@@ -109,7 +110,7 @@ Structure:
 ♪発送と送料：在庫品は1～2営業日以内に発送、再入荷商品は入荷後1～2営業日以内に発送いたします。北海道は基本的に追加送料不要です。沖縄への送料は別途お見積りが必須です。
 ```
 
-**Content**: Raw `Product Specification` text from Baserow, with automatic English→Japanese label translation.
+**Content**: Raw `Product Specification` text from Supabase, with automatic English→Japanese label translation.
 
 Spec translation applies in two stages:
 1. **Label mapping** (always on) — replaces known English labels (e.g. `Weight (kg)`, `Main Material`) with Japanese equivalents using a built-in dictionary. Handles `Label: Value` format line-by-line.
@@ -139,16 +140,16 @@ Spec translation applies in two stages:
 
 | CSV Column | Source | Rule |
 |---|---|---|
-| `商品名` | 886994.`Product Name` | SKU-strip → prefixes → hard trim at 130 |
-| `商品説明` | 886994.`Product Specification` | Prefix + `【商品説明】` + content + footer |
-| `販売価格` | 886994.`Mercari Effective Pricing (incl. shipping)` | Direct value |
+| `商品名` | `product_variants.product_name` | SKU-strip → prefixes → hard trim at 130 |
+| `商品説明` | `product_variants.product_specification` | Prefix + `【商品説明】` + content + footer |
+| `販売価格` | `product_commercials.mercari_effective_price_incl_shipping` | Direct value |
 | `SKU1_商品管理コード` | Item Code | Direct |
-| `SKU1_種類` | 886994.`Representative_Color_JA` | Validated via `is_usable_main_color()`; falls back to Main Color via `prepare_colors.py` |
-| `SKU1_在庫数` | 886994.`Mercari Qty` | Direct |
-| `SKU1_現在の在庫数` | 886994.`Mercari Qty` | Same |
-| `カテゴリID` | 886994.`Mercari category ID` | Direct from Baserow; falls back to `DkjqZAKBXaZN8FB2Kb6zhX` (DIY・工具 > 住宅設備 > その他) if empty |
+| `SKU1_種類` | `product_variants.representative_color_ja` | Validated via `is_usable_main_color()`; falls back to Main Color via `prepare_colors.py` |
+| `SKU1_在庫数` | `product_mercari_qty_vw.mercari_qty` | Direct |
+| `SKU1_現在の在庫数` | `product_mercari_qty_vw.mercari_qty` | Same |
+| `カテゴリID` | `product_variants.mercari_category_id` | Direct from Supabase; falls back to `DkjqZAKBXaZN8FB2Kb6zhX` (DIY・工具 > 住宅設備 > その他) if empty |
 | `送料ID` | — | Blank (seller-paid) |
-| `発送までの日数` | 886994.`Inventory Status` | `"3"` if `Incoming Stock` (or `More On The Way > 0` or `Estimated Next Arrival Date` set); otherwise `"1"` |
+| `発送までの日数` | `product_commercials.inventory_status` | `"3"` if `Incoming Stock` (or `More On The Way > 0` or `Estimated Next Arrival Date` set); otherwise `"1"` |
 | `商品の状態` | Fixed | `"1"` |
 | `配送方法` | Fixed | `"1"` |
 | `発送元の地域` | Fixed | `"jp13"` |
@@ -159,7 +160,7 @@ Spec translation applies in two stages:
 
 **Prepare step** (run before build): `prepare_oversize_images_for_mercari.py` resizes images >10MB to 1500×1500 progressive JPEG, uploads to R2, and writes R2 URLs back to `Image URLs JSON`.
 
-**Build step** source: 886994.`Image URLs JSON` (JSON array). If empty, call GigaB2B API → write back → continue.
+**Build step** source: Supabase.`Image URLs JSON` (JSON array). If empty, call GigaB2B API → write back → continue.
 
 Assembly (columns `商品画像名_1` to `商品画像名_20`):
 - Fill slots 1–20 sequentially from the image URL list.
@@ -174,9 +175,9 @@ Excluded items are reported in the JSON output under `excluded_by_gates`.
 
 | Gate | Condition | Source Field |
 |------|-----------|-------------|
-| `no_unit_price` | `Unit Price` is null or 0 | 886994.`Unit Price` |
-| `no_fulfillment_fees` | `Unit Fulfillment Fees (Drop Shipping)` is null | 886994.`Unit Fulfillment Fees (Drop Shipping)` |
-| `insufficient_images` | Available images < `--min-image-count` (default 5) | 886994.`Image URLs JSON` + GigaB2B API fallback |
+| `no_unit_price` | `Unit Price` is null or 0 | Supabase.`Unit Price` |
+| `no_fulfillment_fees` | `Unit Fulfillment Fees (Drop Shipping)` is null | Supabase.`Unit Fulfillment Fees (Drop Shipping)` |
+| `insufficient_images` | Available images < `--min-image-count` (default 5) | Supabase.`Image URLs JSON` + GigaB2B API fallback |
 
 ## CLI Flags
 
@@ -304,7 +305,7 @@ If any gate is triggered, score = 0 and `商品ステータス` = `"1"` regardle
 
 ## Missing Products Report
 
-For input Item Codes not found in Baserow 886994:
+For input Item Codes not found in Supabase:
 - Skip from the listing CSV.
 - Output `missing_products_YYYY-MM-DD.csv` listing those codes.
 
@@ -330,5 +331,5 @@ Manual via Mercari admin panel (CSV一括機能). This skill does not handle API
 
 ## Secrets
 
-- `BASEROW_TOKEN`, `GIGA_CLIENT_ID`, `GIGA_CLIENT_SECRET` in env or `.env`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GIGA_CLIENT_ID`, `GIGA_CLIENT_SECRET` in env or `.env`
 - Do not hardcode

@@ -1,7 +1,9 @@
 ---
 name: invoice-receipt-automation
-description: Review and execute Homebliss or Mercari invoice, 領収書, and 领收书 workflows from exported request files. Use when the user asks to assess whether receipts can be issued, generate batch PDF invoices/receipts, save them into OneDrive, place the batch MD report in the same folder, inspect the existing Baserow receipt setup, continue the parked Microsoft Graph share-link work, or guide the user to provide the missing receipt inputs required to proceed.
+description: Review and execute Homebliss or Mercari invoice, 領収書, and 领收书 workflows from exported request files. Use when the user asks to assess whether receipts can be issued, generate batch PDF invoices/receipts, save them into OneDrive, place the batch MD report in the same folder, inspect the existing receipt setup, continue the parked Microsoft Graph share-link work, or guide the user to provide the missing receipt inputs required to proceed.
 ---
+
+> **Migration note (2026-07-18):** This skill still references Baserow for receipt/order data (Orders table 889510, Baserow ERP docs). The receipt domain is separate from `product_catalog` and requires its own Baserow→Supabase migration. Until that migration is complete, continue using the Baserow paths documented below.
 
 # Invoice Receipt Automation
 

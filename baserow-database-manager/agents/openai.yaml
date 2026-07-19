@@ -1,4 +1,0 @@
-interface:
-  display_name: "Baserow Database Manager"
-  short_description: "Baserow API operations — row CRUD, batch ops, schema management, table queries."
-  default_prompt: "Use $baserow-database-manager to run Baserow API reads, writes, batch operations, and schema changes with live checks, bounded retries, minimal calls, and the correct token type (database token for rows, JWT for schema)."

@@ -1,6 +1,6 @@
 ---
 name: mercari-add-variant
-description: Create or update Mercari listings with multiple product variants (SKUs) grouped under one listing. Reads SPU1-based variant groups from Baserow Products and creates multi-variant Mercari products via GraphQL API. Use when adding new color/size variants to a product group, consolidating standalone listings into a multi-variant listing, or creating a new product with all its variants in one listing.
+description: Create or update Mercari listings with multiple product variants (SKUs) grouped under one listing. Reads SPU1-based variant groups from Supabase product_variants and creates multi-variant Mercari products via GraphQL API. Use when adding new color/size variants to a product group, consolidating standalone listings into a multi-variant listing, or creating a new product with all its variants in one listing.
 ---
 
 # Mercari Add Variant
@@ -19,6 +19,10 @@ Creates Mercari listings that group multiple product variants (SKUs sharing the 
 - Batch price/stock updates (use `mercari-batch-update`)
 - Product group CSV creation for admin panel (use existing product-group CSV tools)
 
+## Data Source
+
+Supabase `baserow_886994_compat_vw` (joins `product_variants` + `product_commercials`) for reading product data. `platform_listings` + `platform_listing_skus` for writing listing IDs. Domain: `product_catalog`, owned by `retailpulses/RPagentOS`.
+
 ## How It Works
 
 Mercari products can have up to 10 variants (SKUs) under one listing. Each variant has its own `skuCode`, `stockQuantity`, and optional `name` (e.g., color name). All variants share the same product-level fields: title, description, price, images, category, shipping config.
@@ -30,7 +34,7 @@ Mercari products can have up to 10 variants (SKUs) under one listing. Each varia
 ## Safety Model
 
 ```
-1. VALIDATE  → Check Baserow: SKU exists, SPU1 group found, target shop confirmed
+1. VALIDATE  → Check Supabase: SKU exists, SPU1 group found, target shop confirmed
 2. SNAPSHOT  → If modifying existing listings, save full product data before any mutation
 3. DRY-RUN   → Preview the CreateProductInput payload, variant list, and affected SKUs
 4. CONFIRM   → --execute flag required for live mutations
@@ -46,10 +50,10 @@ Mercari products can have up to 10 variants (SKUs) under one listing. Each varia
 
 ### Mode: `create-multi`
 
-Creates one Mercari product containing all specified variants. Reads pricing, category, images, and description from a template SKU in Baserow (the first variant in the SPU1 group). All variants share the same product-level fields.
+Creates one Mercari product containing all specified variants. Reads pricing, category, images, and description from a template SKU in Supabase (the first variant in the SPU1 group). All variants share the same product-level fields.
 
 ```
-Baserow SPU1 group (e.g., N504P415032)
+Supabase SPU1 group (e.g., N504P415032)
 ├── N504P415032A (Black)  ─┐
 ├── N504P415032H (Navy)    ├──> One Mercari product with 3+ variants
 ├── N504P415032N (Ivory)  ─┘
@@ -59,7 +63,7 @@ Baserow SPU1 group (e.g., N504P415032)
 
 ### Mode: `standalone`
 
-Creates a single-SKU product. Functionally identical to the existing `mercari-csv-listing` pipeline's `createProduct` call, but operates on a single SKU directly from Baserow without needing a CSV.
+Creates a single-SKU product. Functionally identical to the existing `mercari-csv-listing` pipeline's `createProduct` call, but operates on a single SKU directly from Supabase without needing a CSV.
 
 ## Quick Start
 
@@ -88,13 +92,13 @@ python tools/add-variant/add_mercari_variant.py \
 
 ## Instructions
 
-### Phase 1: Baserow Discovery
+### Phase 1: Supabase Discovery
 
-Delegate to `baserow-database-manager`:
+Query Supabase `baserow_886994_compat_vw` via PostgREST:
 
-1. **Look up the SKU**: Query Products table (886994) by `item code` to get: SPU1, Mercari category ID, pricing, color, qty, product name, image URLs
+1. **Look up the SKU**: Query by `item_code` to get: SPU1, Mercari category ID, pricing, color, qty, product name, image URLs
 2. **Find SPU1 siblings**: Query all rows where SPU1 matches the target SKU's SPU1
-3. **Check existing listings**: For each sibling, check if `Mercari Shop{N} Product ID` is populated on the target shop
+3. **Check existing listings**: For each sibling, check `platform_listings` for existing `mercari_shop{N}_product_id` on the target shop
 4. **Determine mode**:
    - If NO siblings have listings on target shop → `create-multi` (clean start)
    - If some siblings have standalone listings → warn about duplicates, offer `create-multi` or `standalone`
@@ -102,9 +106,9 @@ Delegate to `baserow-database-manager`:
 
 ### Phase 2: Build & Validate Payload
 
-1. **Template from Baserow**: Use the first available SPU1 sibling's Baserow data for: product name, category ID, description, image URLs, pricing
-2. **Build variants array**: One entry per SKU with `{skuCode, stockQuantity, name}` where `name` = `Representative_Color_JA` from Baserow (or `Main Color` if JP unavailable)
-3. **Set product fields**: Price from `Mercari Effective Pricing (excl. shipping)` or `Mercari Stable Price (excl. shipping)`, shipping defaults to SELLER (送料込み), status defaults to UNOPENED for safety
+1. **Template from Supabase**: Use the first available SPU1 sibling's data for: product name, category ID, description, image URLs, pricing
+2. **Build variants array**: One entry per SKU with `{skuCode, stockQuantity, name}` where `name` = `representative_color_ja` from Supabase (or `main_color` if JP unavailable)
+3. **Set product fields**: Price from `mercari_effective_price_excl_shipping` or `mercari_stable_price_excl_shipping`, shipping defaults to SELLER (送料込み), status defaults to UNOPENED for safety
 4. **Validate**: Category ID non-empty, at least one variant, price > 0, image URLs accessible
 
 ### Phase 3: Execute (via mercari-shop-api-specialist)
@@ -118,13 +122,13 @@ Delegate API execution to `mercari-shop-api-specialist`:
 
 1. Query each variant SKU via `productVariant(by: {skuCode})` — confirm all resolve to the same product ID
 2. Save result JSON to `tools/add-variant/results/` with product ID, variant IDs, timestamp
-3. Optionally update Baserow: set `Mercari Shop{N} Product ID` for the SKUs that were listed
+3. Optionally update Supabase `platform_listings`: set `mercari_shop{N}_product_id` for the SKUs that were listed
 
 ## CLI Reference
 
 ```
 add_mercari_variant.py
-  --sku SKU               Target SKU (item code from Baserow Products)
+  --sku SKU               Target SKU (item_code from Supabase)
   --shop {shop1,shop2,shop3,shop4}
                           Target Mercari shop
   --mode {create-multi,standalone}
@@ -133,7 +137,7 @@ add_mercari_variant.py
   --variants SKU,SKU,...  Optional: explicit variant SKU list (overrides SPU1 auto-discovery)
   --status {UNOPENED,OPENED}
                           Listing status (default: UNOPENED for safety)
-  --price PRICE           Override price (default: from Baserow)
+  --price PRICE           Override price (default: from Supabase)
   --dry-run               Preview payload without executing
   --execute               Execute the createProduct mutation
   --result-dir DIR        Output directory for result JSON (default: ./results/)
@@ -178,10 +182,15 @@ query productVariant($by: ProductVariantBy!) {
 
 | Skill | Role |
 |-------|------|
-| `baserow-database-manager` | Read Products table for SKU data, SPU1 grouping, pricing, images |
 | `mercari-shop-api-specialist` | VPS SSH execution, token resolution, GraphQL error handling |
 
-This skill is the **decision layer**: it reads Baserow to determine which mode to use, builds the payload, and delegates API execution to the specialist skill.
+This skill is the **decision layer**: it reads Supabase to determine which mode to use, builds the payload, and delegates API execution to the specialist skill.
+
+## Credentials
+
+- `SUPABASE_URL` — Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` — service_role key for reads/writes
+- `MERCARI_SHOP{N}_TOKEN` — Mercari shop API tokens
 
 ## Rollback
 

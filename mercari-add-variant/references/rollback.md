@@ -25,6 +25,6 @@ If a future update adds support for modifying existing products (e.g., consolida
 
 1. **Full snapshot saved before any deletion** (JSON with all product fields + variant list)
 2. **If createProduct fails after delete**: recreate the old product from snapshot using the same `createProduct` mutation
-3. **Update Baserow** to point back to the restored product ID
+3. **Update Supabase** to point back to the restored product ID
 
 This is NOT currently implemented. Do not attempt without explicit user approval and a verified snapshot.

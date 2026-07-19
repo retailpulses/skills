@@ -1,34 +1,38 @@
 ---
 name: mercari-category-id
-description: Populate Mercari category IDs in Baserow Products by reading the live schema, matching category master data against Product Name, and writing the Mercari category ID field with exact-match-first and parent-category fallback rules.
+description: Populate Mercari category IDs in Supabase product_variants by reading the live schema, matching category master data against Product Name, and writing the Mercari category ID field with exact-match-first and parent-category fallback rules.
 ---
 
 # Mercari Category ID
 
-Use this skill when the user wants to write Mercari category IDs into Baserow `Products` or into a local CSV from a category master CSV or similar live master data.
+Use this skill when the user wants to write Mercari category IDs into Supabase `product_variants` (via `baserow_886994_compat_vw`) or into a local CSV from a category master CSV or similar live master data.
 
-This skill is for live Baserow work, not browser automation.
+This skill is for live Supabase work via PostgREST API, not browser automation.
+
+## Data Source
+
+Supabase `baserow_886994_compat_vw` — a compatibility view joining `product_variants` + `product_commercials`. Owned by `retailpulses/RPagentOS` (domain: `product_catalog`).
 
 ## Workflow
 
 1. Detect the input mode.
-2. If the user gave Baserow `Products`, confirm the live schema before writing anything.
+2. If the user gave Supabase data, confirm the live schema via PostgREST before writing anything.
 3. If the user gave a CSV, inspect the header first and preserve all other columns.
 4. Load the category master CSV and build a lookup from category name and full path.
 5. Match primarily from `Product Name` or the product-name column in the CSV.
-6. Write `Mercari category ID` only.
+6. Write `Mercari category ID` only to `product_variants.mercari_category_id`.
 7. Run a 100-row pilot first when the task is new or the match quality is uncertain.
 8. If the pilot looks correct, continue with the remaining rows and verify after write.
 
 ## Live Schema Rules
 
 - Always inspect the live table schema before assuming any field name.
-- Use `Authorization: Token <database_token>` for row reads and writes.
-- Use `user_field_names=true` so field keys are readable.
-- Page through full tables with `size=200&page=<n>` when reading more than one page.
-- Treat `Mercari category ID` as the writable target field if the live schema confirms that exact label.
+- Use PostgREST API (`SUPABASE_URL/rest/v1/`) with `Authorization: Bearer <service_role_key>`.
+- Use `Accept: application/json` and `Prefer: return=representation` headers.
+- Page through results with Range headers when reading more than one page.
+- Treat `mercari_category_id` as the writable target field in `product_variants`.
 - Do not write any other field unless the user explicitly asks.
-- If the task is on live Baserow `Products`, keep the workflow row-level and append-free; do not change the schema.
+- Keep the workflow row-level and append-free; do not change the schema.
 - If the task is on a CSV file, preserve all other columns and only add or update the category column.
 
 ## CSV Input Rules
@@ -60,12 +64,18 @@ This skill is for live Baserow work, not browser automation.
 - First do a 100-row pilot write.
 - Read the pilot rows back and verify the results.
 - If the pilot is acceptable, continue in batches.
-- Use batch writes when possible.
-- Re-read after write to confirm there are no remaining blank `Mercari category ID` cells.
+- Use PostgREST PATCH with `in` filter for batch updates.
+- Re-read after write to confirm there are no remaining blank `mercari_category_id` cells.
+
+## Credentials
+
+- `SUPABASE_URL` — Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` — service_role key for writes
+- `BASEROW_TOKEN` (legacy) — no longer used; ignore if present
 
 ## Operational Guardrails
 
-- Refresh live Baserow data before any production write.
+- Refresh live Supabase data before any production write.
 - Do not rely on older local snapshots.
 - Do not use browser automation when the API path is available.
 - Do not change unrelated fields.
@@ -76,4 +86,4 @@ This skill is for live Baserow work, not browser automation.
 
 - Do not use it for Rakuten, Amazon, or Mercari copywriting.
 - Do not use it for inventory, price, or stock updates.
-- Do not use it if the task is about categories outside Baserow `Products`.
+- Do not use it if the task is about categories outside Supabase product_variants.

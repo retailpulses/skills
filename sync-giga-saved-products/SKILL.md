@@ -1,15 +1,25 @@
 ---
 name: sync-giga-saved-products
-description: Sync GigaB2B products into Baserow Products table 886994 / product master from explicit Item Codes or recently saved GigaB2B products. Use when the user asks to upload, import, backfill, create, update, or normalize GigaB2B products in Baserow Products, product master, or table 886994. The workflow resolves saved-product SKUs, enriches from Giga detailInfo, price, and inventory APIs, writes complete normalized Products rows, skips duplicates by default, and updates existing rows only when explicitly requested.
+description: Sync GigaB2B products into Supabase product_variants + product_commercials from explicit Item Codes or recently saved GigaB2B products. Use when the user asks to upload, import, backfill, create, update, or normalize GigaB2B products. The workflow resolves saved-product SKUs, enriches from Giga detailInfo, price, and inventory APIs, writes complete normalized rows, skips duplicates by default, and updates existing rows only when explicitly requested.
 ---
 
-# Sync Giga Products To Baserow Products
+# Sync Giga Products To Supabase
 
-Use this skill to land complete, normalized GigaB2B product data into Baserow `Products` table `886994`.
+Use this skill to land complete, normalized GigaB2B product data into Supabase `product_variants` and `product_commercials`.
+
+## Backend
+
+Supabase is the only backend. The legacy Baserow 886994 path has been retired.
+
+| Backend | Script | Target |
+|---------|--------|--------|
+| Supabase | `scripts/sync_to_supabase.py` | `product_variants` + `product_commercials` |
 
 Treat "saved products" as one input mode only. The product-master payload must come from the richer GigaB2B detail, price, and inventory endpoints, not only from the saved-products list.
 
 ## Source Of Truth
+
+The canonical Supabase schema is owned by `retailpulses/RPagentOS` (domain: `product_catalog`). Do not create or alter schema objects from this skill.
 
 Prefer the implementation and field mapping in:
 
@@ -47,84 +57,82 @@ For product-master enrichment, batch SKUs and call:
 
 Do not create a Products row from the saved-products response alone. It is not complete enough.
 
-## Baserow Workflow
+## Workflow
 
-1. Load the live schema for table `886994` before writing.
-2. Resolve the `Item Code` field ID from the live schema.
-3. Fetch formula fields from the live schema and remove them from payloads before writing.
-4. Use exact server-side filtering by `Item Code`; do not rely on fuzzy `search` for duplicate checks.
-5. Skip existing `Item Code` rows by default.
-6. Update existing rows only if the user explicitly asks for update/backfill/refresh mode.
-7. Verify created or updated rows by re-reading them from Baserow.
-8. Do not create a Baserow job log unless the user explicitly asks for one.
+1. Read the live Supabase schema for `product_variants` and `product_commercials` before writing.
+2. Resolve column names from the live schema.
+3. Use exact server-side filtering by `item_code`; do not rely on fuzzy search for duplicate checks.
+4. Skip existing `item_code` rows by default.
+5. Update existing rows only if the user explicitly asks for update/backfill/refresh mode.
+6. Verify created or updated rows by re-reading them via PostgREST.
+7. Do not create a job log unless the user explicitly asks for one.
 
 ## Write Modes
 
-- Default mode: create missing Products rows only.
+- Default mode: create missing rows only.
 - Dry-run first when doing live product-master writes unless the user explicitly asks to execute immediately.
-- Update mode: patch existing Products rows only when the user explicitly asks for updates/backfills/refreshes.
-- This skill writes only to Baserow `Products` table `886994`.
+- Update mode: patch existing rows only when the user explicitly asks for updates/backfills/refreshes.
+- This skill writes only to `product_variants` and `product_commercials`.
 
 ## Products Field Mapping
 
-Build the Baserow `886994` payload from Giga `detailInfo`, `price`, and `inventory` using the canonical implementation. The current normalized Products fields include:
+Build the Supabase payload from Giga `detailInfo`, `price`, and `inventory` using the canonical implementation. The current normalized fields include:
 
-| Baserow field | Source / rule |
+| Supabase column | Source / rule |
 |---|---|
-| `item code` | `detail.sku` or `price.sku` or `inventory.sku` |
-| `Product Name` | `detail.productName` |
-| `Store Code` | `price.sellerInfo.sellerCode` |
-| `Store Name` | `price.sellerInfo.sellerStore` |
-| `Seller Type` | `price.sellerInfo.sellerType` |
-| `GIGA Index` | stringified `price.sellerInfo.gigaIndex` |
-| `Unit Price` | `price.price` |
-| `Discounted Unit Price` | `price.discountedPrice` |
-| `Exclusive Price` | `price.exclusivePrice` |
-| `MAP` | `price.mapPrice` |
-| `Unit Fulfillment Fee (Drop Shipping)` | `price.shippingFee` |
-| `Start From` | date-only `price.promotionFrom` |
-| `Discount Promotion End Time` | `price.promotionTo` |
-| `Effective Cost Price` | rounded first valid value from Exclusive, Discounted, Unit |
-| `First Arrival Date` | `detail.firstArrivalDate` |
-| `Product Main Image` | `detail.mainImageUrl`, falling back to first `detail.imageUrls[]` value when needed |
-| `Image URLs JSON` | JSON array of de-duplicated image URLs from `Product Main Image` plus `detail.imageUrls[]` |
-| `Product Images (exclude main)1..26` | de-duplicated `detail.imageUrls[]` values after removing the main image |
-| `Main Color` | `detail.mainColor` |
-| `Representative_Color_JA` | field `8188238`; Japanese color translated from `detail.mainColor`, or existing Japanese `detail.mainColor`; leave blank when no safe Japanese value can be derived |
-| `Main_Material` | `detail.mainMaterial` |
-| `Marketing Description` | `detail.description` |
-| `User Manual URL` | first value in `detail.fileUrls` |
-| `Product Features` | cleaned Giga `characteristics` joined as Japanese bullet lines |
-| `Product Specification` | attributes + description + characteristics |
-| `Combo Product?` | boolean `detail.comboFlag` |
-| `Package Size-Width (cm)` | numeric `detail.widthCm` |
-| `Package Size-Length (cm)` | numeric `detail.lengthCm` |
-| `Package Size-Height (cm)` | numeric `detail.heightCm` |
-| `Package Size-Weight (kg)` | numeric `detail.weightKg` |
-| `Assembled Size-Width (cm)` | numeric `detail.assembledWidth` |
-| `Assembled Size-Length (cm)` | numeric `detail.assembledLength` |
-| `Assembled Size-Height (cm)` | numeric `detail.assembledHeight` |
-| `Product Weight (kg)` | numeric `detail.assembledWeight` |
-| `Internal_Cat_Name` | `detail.category`, JSON-stringified if non-string |
-| `Internal_CAT_ID` | stringified `detail.categoryCode` |
-| `Qty Available` | `inventory.sellerInventoryInfo.sellerAvailableInventory` |
-| `Owned Qty` | `inventory.buyerInventoryInfo.totalBuyerAvailableInventory` |
-| `More On The Way` | stringified `nextArrivalInventory.nextArrivalQtyMax` |
-| `nextArrivalBegain` | stringified `nextArrivalInventory.nextArrivalBegin` |
-| `nextArrivalEnd` | stringified `nextArrivalInventory.nextArrivalEnd` |
-| `Inventory Status` | `in_stock` when Giga says SKU is available, otherwise `unavailable` |
-| `Platform_Attributes_JSON` | JSON containing raw `giga_detail`, `giga_price`, and `giga_inventory` |
+| `item_code` | `detail.sku` or `price.sku` or `inventory.sku` |
+| `product_name` | `detail.productName` |
+| `store_code` | `price.sellerInfo.sellerCode` |
+| `store_name` | `price.sellerInfo.sellerStore` |
+| `seller_type` | `price.sellerInfo.sellerType` |
+| `giga_index` | stringified `price.sellerInfo.gigaIndex` |
+| `unit_price` | `price.price` |
+| `discounted_unit_price` | `price.discountedPrice` |
+| `exclusive_price` | `price.exclusivePrice` |
+| `map_price` | `price.mapPrice` |
+| `shipping_fee` | `price.shippingFee` |
+| `promotion_from` | date-only `price.promotionFrom` |
+| `promotion_to` | `price.promotionTo` |
+| `effective_cost_price` | rounded first valid value from Exclusive, Discounted, Unit |
+| `first_arrival_date` | `detail.firstArrivalDate` |
+| `main_image_url` | `detail.mainImageUrl`, falling back to first `detail.imageUrls[]` value when needed |
+| `image_urls_json` | JSON array of de-duplicated image URLs from main image plus `detail.imageUrls[]` |
+| `main_color` | `detail.mainColor` |
+| `representative_color_ja` | Japanese color translated from `detail.mainColor`, or existing Japanese `detail.mainColor`; leave blank when no safe Japanese value can be derived |
+| `main_material` | `detail.mainMaterial` |
+| `marketing_description` | `detail.description` |
+| `user_manual_url` | first value in `detail.fileUrls` |
+| `product_features` | cleaned Giga `characteristics` joined as Japanese bullet lines |
+| `product_specification` | attributes + description + characteristics |
+| `combo_product` | boolean `detail.comboFlag` |
+| `package_width_cm` | numeric `detail.widthCm` |
+| `package_length_cm` | numeric `detail.lengthCm` |
+| `package_height_cm` | numeric `detail.heightCm` |
+| `package_weight_kg` | numeric `detail.weightKg` |
+| `assembled_width_cm` | numeric `detail.assembledWidth` |
+| `assembled_length_cm` | numeric `detail.assembledLength` |
+| `assembled_height_cm` | numeric `detail.assembledHeight` |
+| `assembled_weight_kg` | numeric `detail.assembledWeight` |
+| `internal_cat_name` | `detail.category`, JSON-stringified if non-string |
+| `internal_cat_id` | stringified `detail.categoryCode` |
+| `qty_available` | `inventory.sellerInventoryInfo.sellerAvailableInventory` |
+| `owned_qty` | `inventory.buyerInventoryInfo.totalBuyerAvailableInventory` |
+| `more_on_the_way` | stringified `nextArrivalInventory.nextArrivalQtyMax` |
+| `next_arrival_begin` | stringified `nextArrivalInventory.nextArrivalBegin` |
+| `next_arrival_end` | stringified `nextArrivalInventory.nextArrivalEnd` |
+| `inventory_status` | `in_stock` when Giga says SKU is available, otherwise `unavailable` |
+| `platform_attributes_json` | JSON containing raw `giga_detail`, `giga_price`, and `giga_inventory` |
 
-Do not write Baserow formula fields such as computed discount fields.
-Do not write legacy `Estimated Next Arrival Date`; write `nextArrivalBegain` and `nextArrivalEnd` directly instead.
+Do not write computed/formula columns.
+Do not write legacy `Estimated Next Arrival Date`; write `next_arrival_begin` and `next_arrival_end` directly instead.
 
 ## Data Quality Rules
 
-- Treat `Item Code` as the unique key.
+- Treat `item_code` as the unique key.
 - Skip ghost SKUs when Giga detail has no `productName`, no `description`, and no `mainImageUrl`.
-- Do not invent values absent from GigaB2B or Baserow.
-- Keep raw Giga payloads in `Platform_Attributes_JSON` for traceability.
-- Preserve existing Baserow rows in default create-only mode.
+- Do not invent values absent from GigaB2B or Supabase.
+- Keep raw Giga payloads in `platform_attributes_json` for traceability.
+- Preserve existing rows in default create-only mode.
 - Propagate parent pricing to variant SKUs only when using the canonical implementation's variant-pricing step.
 - Report counts for created, updated, skipped, ghosts, errors, and verification results.
 
@@ -132,8 +140,8 @@ Do not write legacy `Estimated Next Arrival Date`; write `nextArrivalBegain` and
 
 Use environment variables only:
 
-- `BASEROW_TOKEN`
-- `BASEROW_BASE_URL`, optional, default `https://api.baserow.io`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 - `GIGA_CLIENT_ID`
 - `GIGA_CLIENT_SECRET`
 - `GIGA_API_BASE_URL`, optional, default `https://openapi.gigab2b.com`
@@ -160,14 +168,14 @@ Required headers:
 
 - Confirm input mode and SKU count.
 - Confirm dry-run versus write mode.
-- Load live Baserow schema and strip formula fields.
+- Read live Supabase schema.
 - Fetch saved-products SKUs when needed.
 - Fetch Giga detail, price, and inventory data for target SKUs.
-- Create or update Baserow Products according to the requested mode.
-- Verify written rows by exact `Item Code`.
+- Create or update rows according to the requested mode.
+- Verify written rows by exact `item_code`.
 - Summarize created, updated, skipped, ghosts, errors, and verification results.
 
 ## References
 
 - `references/GIGAB2B_API_ACCESS.md` for saved-products API access details.
-- `/Users/user/Documents/Retailpulses/20_REPOS/listing-mgmt/tools/shared/giga-sync/giga_baserow_sync.py` for the current normalized Products-table implementation.
+- `/Users/user/Documents/Retailpulses/20_REPOS/listing-mgmt/tools/shared/giga-sync/giga_baserow_sync.py` for the current normalized implementation.

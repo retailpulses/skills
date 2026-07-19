@@ -1,6 +1,6 @@
 ---
 name: amazon-inventory-flatfile
-description: Update Amazon listing inventory in Baserow, generate Amazon Price and Quantity flat files from the official template, and summarize Amazon processing summaries into execution reports. Use when the user asks to sync `Amazon listings` inventory from `Products`, create an Amazon inventory upload file, inspect a `PriceAndQuantity.xlsm` template, or review an Amazon processing summary after upload.
+description: Update Amazon listing inventory in Supabase, generate Amazon Price and Quantity flat files from the official template, and summarize Amazon processing summaries into execution reports. Use when the user asks to sync Amazon listings inventory from product_variants, create an Amazon inventory upload file, inspect a `PriceAndQuantity.xlsm` template, or review an Amazon processing summary after upload.
 ---
 
 # Amazon Inventory Flatfile
@@ -9,11 +9,15 @@ description: Update Amazon listing inventory in Baserow, generate Amazon Price a
 
 Execute the Amazon inventory workflow in three steps:
 
-1. Sync `Amazon listings` inventory from `Products` in Baserow.
+1. Sync `amazon_listings` inventory from `product_variants` in Supabase.
 2. Generate a valid Amazon inventory upload file from the official `PriceAndQuantity.xlsm` template.
 3. If the user provides a processing summary, generate an execution report in Markdown.
 
 Use the scripts in `scripts/` for repeatable work. Read [references/workflow.md](references/workflow.md) when you need the verified defaults, matching rules, and failure modes.
+
+## Data Source
+
+Supabase `amazon_listings` table and `baserow_886994_compat_vw` (joins `product_variants` + `product_commercials`). Domain: `product_catalog`, owned by `retailpulses/RPagentOS`.
 
 ## Workflow
 
@@ -21,122 +25,76 @@ Use the scripts in `scripts/` for repeatable work. Read [references/workflow.md]
 
 Prefer the live defaults from [references/workflow.md](references/workflow.md) unless the user gives replacements:
 
-- Baserow database token
-- `Products` table
-- `Amazon listings` table
+- Supabase project credentials (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`)
+- `product_variants` (via `baserow_886994_compat_vw`)
+- `amazon_listings` table
 - official Amazon `PriceAndQuantity.xlsm` template path
 - target output folder
 
 If the user gave a processing summary file, treat it as phase 3 input and keep going.
 
-## Baserow Access
+## Supabase Access
 
-Use the live Baserow APIs directly when you need to read, compare, sync, or verify data.
+Use PostgREST API directly when you need to read, compare, sync, or verify data.
 
-- Authenticate with `Authorization: Token <Baserow database token>`.
-- Read rows from `https://api.baserow.io/api/database/rows/table/<table_id>/?user_field_names=true`.
-- Use pagination with `size=200&page=<n>` when reading full tables.
+- Authenticate with `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
+- Read rows from `{SUPABASE_URL}/rest/v1/baserow_886994_compat_vw?select=*`.
+- Use Range headers for pagination when reading large result sets.
 - Use the live schema before assuming field names if table structure may have changed.
-- For bulk inventory sync, build a map from `Products.item code` to the computed quantity.
+- For bulk inventory sync, build a map from `product_variants.item_code` to the computed quantity.
 - Quantity Rule: `Max(Qty Available, Owned Qty, Presale Qty)`.
 - Restock Policy: If `Presale Qty` is used, then `Restock date` is mandatory to use the presale count; otherwise fallback to `Max(Qty Available, Owned Qty)`.
-- Match `Amazon listings.Item Code` to `Products.item code`.
-- Write `Amazon listings.在庫数 (JP)` and `Amazon listings.再入荷日 (JP)` fields during inventory sync.
-- Use batch `PATCH` to `/api/database/rows/table/<table_id>/batch/?user_field_names=true` for inventory updates.
+- Match `amazon_listings.item_code` to `product_variants.item_code`.
+- Write `amazon_listings.quantity` and `amazon_listings.last_synced_at` during inventory sync.
+- Use PostgREST PATCH with batch operations for inventory updates.
 - Keep syncs append-free and non-destructive: do not create or delete rows in this workflow.
 
-### 2. Sync Baserow inventory first
+### 2. Sync Supabase inventory first
 
 Run:
 
 ```bash
-python3 scripts/sync_baserow_inventory.py \
-  --token "$TOKEN" \
-  --products-table-id 886994 \
-  --amazon-table-id 907027
+python3 scripts/sync_supabase_inventory.py \
+  --supabase-url "$SUPABASE_URL" \
+  --supabase-key "$SUPABASE_SERVICE_ROLE_KEY" \
+  [--dry-run] [--confirm]
 ```
 
-Default behavior:
+This reads `product_variants` inventory quantities and writes them to `amazon_listings`.
 
-- match `Amazon listings.Item Code` to `Products.item code`
-- write computed quantity into `Amazon listings.在庫数 (JP)`
-- write `Products.Restock date` into `Amazon listings.再入荷日 (JP)` if Presale rule is triggered
-- if a listing row is unmatched, write `0` and clear restock date
-- leave other listing fields untouched
-
-Use `--dry-run` first if the user asks for verification before write.
-
-### 3. Generate the flat file from the official template
-
-Do not generate a minimal custom CSV. Amazon accepted the template-structured tab-delimited file and rejected the ad hoc 3-column file.
+### 3. Generate the Amazon inventory flatfile
 
 Run:
 
 ```bash
 python3 scripts/build_inventory_flatfile.py \
-  --token "$TOKEN" \
-  --amazon-table-id 907027 \
-  --template-path "/path/to/PriceAndQuantity.xlsm" \
-  --output-path "/path/to/PriceAndQuantity_inventory_full_template_YYYY-MM-DD.txt"
+  --template <PriceAndQuantity.xlsm> \
+  --output <output_dir> \
+  [--supabase-url "$SUPABASE_URL"] \
+  [--supabase-key "$SUPABASE_SERVICE_ROLE_KEY"]
 ```
 
-Required output rules:
+Reads from `amazon_listings` and generates the inventory upload file.
 
-- preserve template rows 1-6
-- preserve full template column layout
-- fill only:
-  - `SKU`
-  - `フルフィルメントチャネルコード (JP)`
-  - `在庫数 (JP)`
-  - `再入荷日 (JP)`
-- leave all other columns blank
-- write a tab-delimited `.txt`
-- include the current date in the filename
+### 4. Generate processing summary report (if applicable)
 
-### 4. Review processing summaries when provided
-
-If the user gives a processing summary, generate a report instead of only paraphrasing the file.
-
-Run:
+If the user provides an Amazon processing summary file:
 
 ```bash
 python3 scripts/summarize_processing_summary.py \
-  --summary-path "/path/to/processing-summary.xlsm" \
-  --output-path "/same/folder/EXECUTION_REPORT_Amazon_inventory_upload_YYYY-MM-DD.md"
+  --summary <processing_summary.txt> \
+  --output <output_dir>
 ```
 
-Supported inputs:
+## Credentials
 
-- Amazon processing summary `.xlsm`
-- text processing summary `.txt`
+- `SUPABASE_URL` — Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` — service_role key for reads/writes
+- `BASEROW_TOKEN` (legacy) — no longer used; ignore if present
 
-The report should cover:
+## References
 
-- inventory update result
-- counts for processed, successful, failed, and success-with-other-errors
-- grouped error codes
-- affected SKUs
-- concise recommendations
-
-### 5. Respond with the right level of detail
-
-If there is no processing summary yet, report:
-
-- Baserow sync result
-- file path created
-- output format used
-
-If there is a processing summary, report:
-
-- upload result
-- whether inventory processing succeeded
-- any non-blocking listing errors
-- path to the saved Markdown report
-
-## Guardrails
-
-- Verify the official template path before generating the flat file.
-- Prefer live schema verification if table names or field names appear to have changed.
-- Prefer the live Baserow API and the bundled scripts over ad hoc field assumptions.
-- Treat `success with other errors` as inventory processed unless the summary explicitly shows failed rows.
-- Do not switch back to a custom minimal CSV format unless the user explicitly asks to experiment again.
+- `references/workflow.md` — Verified defaults, matching rules, and failure modes
+- `scripts/sync_supabase_inventory.py` — Supabase inventory sync (replaces legacy sync_baserow_inventory.py)
+- `scripts/build_inventory_flatfile.py` — Amazon flatfile builder
+- `scripts/summarize_processing_summary.py` — Processing summary report generator

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# TODO(2026-07-18): Migrate from Baserow API to Supabase PostgREST.
+# This script still uses api.baserow.io — update to SUPABASE_URL/rest/v1/.
+# See docs/BASEROW_TO_SUPABASE_MIGRATION.md for the migration plan.
 import argparse
 import csv
 import json

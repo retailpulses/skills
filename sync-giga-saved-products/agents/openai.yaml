@@ -1,4 +1,4 @@
 interface:
   display_name: "Sync Giga Products"
-  short_description: "Sync normalized GigaB2B products to Baserow 886994."
-  default_prompt: "Use $sync-giga-saved-products to sync GigaB2B products into Baserow Products table 886994 with complete normalized product-master fields."
+  short_description: "Sync normalized GigaB2B products to Supabase product_variants + product_commercials."
+  default_prompt: "Use $sync-giga-saved-products to sync GigaB2B products into Supabase with complete normalized product-master fields."

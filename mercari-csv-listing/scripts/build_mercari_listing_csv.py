@@ -7,94 +7,18 @@ import os
 import re
 import sys
 import time
-import urllib.parse
+import requests  # kept for DeepSeek API calls only
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 
-import requests
-
-BASEROW_API = "https://api.baserow.io/api"
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mercari_text_utils
+from supabase_db import SupabaseDB, resolve_credentials
 
 UNSUPPORTED_SKU_TYPE_VALUES = {"default", "n/a", "na", "unknown", "-", "ー"}
 INVALID_JP_COLOR_HINTS = ("ください", "教えて", "翻訳", "カタカナで", "わかりました")
 
 
-def load_dotenv(path: str) -> None:
-    if not os.path.isfile(path):
-        return
-    with open(path, "r", encoding="utf-8") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k = k.strip()
-            v = v.strip().strip('"').strip("'")
-            if k and k not in os.environ:
-                os.environ[k] = v
-
-
-def resolve_token(cli_token: Optional[str]) -> str:
-    if cli_token:
-        return cli_token.strip()
-    for key in ("BASEROW_TOKEN", "RP_BASEROW_TOKEN", "TOKEN"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    raise SystemExit("Missing Baserow token. Pass --token or set BASEROW_TOKEN.")
-
-
-def _baserow_headers(token: str) -> dict:
-    return {"Authorization": f"Token {token}"}
-
-
-def _get_with_retry(session: requests.Session, url: str, token: str, timeout: int = 120) -> dict:
-    last_exc = None
-    for attempt in range(4):
-        try:
-            resp = session.get(url, headers=_baserow_headers(token), timeout=timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as exc:
-            last_exc = exc
-            if attempt == 3:
-                raise
-            time.sleep(1.2 * (attempt + 1))
-    raise last_exc
-
-
-def fetch_rows_by_equal_filter(session: requests.Session, token: str, table_id: int, field_key: str, values: List[str]) -> List[dict]:
-    rows: List[dict] = []
-    seen_ids = set()
-    for value in sorted(set(v for v in values if v)):
-        page = 1
-        while True:
-            query = urllib.parse.urlencode(
-                {
-                    "user_field_names": "true",
-                    "size": 200,
-                    "page": page,
-                    f"filter__{field_key}__equal": value,
-                }
-            )
-            url = f"{BASEROW_API}/database/rows/table/{table_id}/?{query}"
-            data = _get_with_retry(session, url, token)
-            batch = (data or {}).get("results", [])
-            if not batch:
-                break
-            for row in batch:
-                rid = row.get("id")
-                if rid in seen_ids:
-                    continue
-                seen_ids.add(rid)
-                rows.append(row)
-            if len(batch) < 200:
-                break
-            page += 1
-    return rows
 
 
 def parse_item_codes(value: str) -> List[str]:
@@ -654,7 +578,7 @@ def compute_score(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build Mercari listing CSV from Item Codes (seller-paid shipping, single table 886994).")
+    parser = argparse.ArgumentParser(description="Build Mercari listing CSV from Item Codes via Supabase (seller-paid shipping).")
     parser.add_argument("--item-codes", required=True, help="Comma-separated item codes or path to newline file")
     parser.add_argument("--template-csv", required=True, help="Mercari import template CSV path")
     parser.add_argument("--output-path", default=None)
@@ -662,28 +586,21 @@ def main() -> None:
     parser.add_argument("--template-encoding", default="utf-8-sig")
     parser.add_argument("--output-encoding", default="utf-8-sig")
     parser.add_argument("--shipping-guide-url", required=True, help="URL of shipping fee guide image to append")
-    parser.add_argument("--products-table-id", type=int, default=886994)
+    parser.add_argument("--products-table-id", type=int, default=None, help="Deprecated — ignored, uses Supabase compat view")
     parser.add_argument("--description-prefix", default=DEFAULT_DESC_PREFIX)
     parser.add_argument("--description-footer", default="")
     parser.add_argument("--score", action="store_true", help="Enable 10-module quality scoring")
     parser.add_argument("--auto-open-qualified", action="store_true", help="Set 商品ステータス=2 for score >= 80 (requires --score)")
-    parser.add_argument("--baserow-workers", type=int, default=10, help="Number of parallel Baserow read workers (default: 10)")
+    parser.add_argument("--baserow-workers", type=int, default=None, help="Deprecated — ignored")
     parser.add_argument("--dry-run", action="store_true", help="Preview exclusions without writing CSV")
     parser.add_argument("--min-image-count", type=int, default=5, help="Minimum image count threshold (default: 5)")
     parser.add_argument("--use-deepseek-desc", action="store_true", help="Use DeepSeek LLM for full spec translation (requires DEEPSEEK_API_KEY)")
     parser.add_argument("--deepseek-api-key", default=None, help="DeepSeek API key (default: DEEPSEEK_API_KEY env var)")
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    load_dotenv(os.path.join(script_dir, ".env"))
-    load_dotenv(os.path.join(script_dir, ".env.local"))
-    load_dotenv(os.path.join(os.path.dirname(script_dir), ".env"))
-    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), ".env"))
-    # Also check CWD for .env (project root search)
-    load_dotenv(os.path.join(os.getcwd(), ".env"))
-    load_dotenv(os.path.join(os.getcwd(), ".env.local"))
-
-    token = resolve_token(args.token)
+    key = resolve_credentials(args.token)
+    if not key:
+        raise SystemExit("Missing Supabase key. Pass --token or set SUPABASE_SERVICE_ROLE_KEY.")
 
     deepseek_api_key = args.deepseek_api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("Deepseek_API_KEY")
     if args.use_deepseek_desc and not deepseek_api_key:
@@ -697,31 +614,16 @@ def main() -> None:
     if not fieldnames:
         raise SystemExit("Template CSV has no header")
 
-    session = requests.Session()
+    db = SupabaseDB()
 
-    sys.stderr.write(f"Fetching {len(item_codes)} codes from table {args.products_table_id} with {args.baserow_workers} workers...\n")
-
-    products: List[dict] = []
-    batches = [[c] for c in item_codes]
-
-    with ThreadPoolExecutor(max_workers=args.baserow_workers) as executor:
-
-        def fetch_one(code: str) -> List[dict]:
-            return fetch_rows_by_equal_filter(session, token, args.products_table_id, "field_7670234", [code])
-
-        fut_map = {executor.submit(fetch_one, b[0]): i for i, b in enumerate(batches)}
-        for f in as_completed(fut_map):
-            try:
-                products.extend(f.result())
-            except Exception as exc:
-                sys.stderr.write(f"  Batch {fut_map[f]} failed: {exc}\n")
-
-    products_map = {str_value(r.get("item code")): r for r in products}
+    sys.stderr.write(f"Fetching {len(item_codes)} codes from Supabase compat view...\n")
+    products_map = db.fetch_by_item_codes(item_codes)
+    products = list(products_map.values())
     found_codes = set(products_map.keys())
     missing_codes = sorted(set(item_codes) - found_codes)
 
     present_codes = [c for c in item_codes if c in found_codes]
-    sys.stderr.write(f"Found {len(present_codes)} codes in 886994, {len(missing_codes)} missing\n")
+    sys.stderr.write(f"Found {len(present_codes)} codes in Supabase, {len(missing_codes)} missing\n")
 
     # Overlap GigaB2B image fetch with main processing
     giga_future = None
@@ -877,8 +779,8 @@ def main() -> None:
     report: dict = {
         "dry_run": args.dry_run,
         "item_codes_total": len(item_codes),
-        "found_in_886994": len(present_codes),
-        "missing_from_886994": missing_codes,
+        "found_in_db": len(present_codes),
+        "missing_from_db": missing_codes,
         "rows_written": len(out_rows),
         "excluded_by_gates": {
             "count": len(excluded_gates),

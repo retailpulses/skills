@@ -119,7 +119,7 @@ def load_skill_json():
 def main():
     """主函数"""
     print("="*60)
-    print("amz-product-optimizer 技能安装验证")
+    print("amazon-listing-optimizer 技能安装验证")
     print("="*60)
     
     checks = [

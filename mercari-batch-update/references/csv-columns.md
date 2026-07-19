@@ -7,7 +7,7 @@ All accepted column names for the Mercari batch update CSV. Column names are cas
 | CSV Header | Internal Key | Required | Notes |
 |------------|-------------|:---:|-------|
 | `product_id` | `product_id` | ✅ | Mercari product ID (e.g., `m123456`) |
-| `Listing ID` | `product_id` | ✅ | Same as above (Baserow convention) |
+| `Listing ID` | `product_id` | ✅ | Same as above (Supabase convention) |
 | `商品ID` | `product_id` | ✅ | Japanese header variant |
 
 ## SKU Column (required for price pre-check, strongly recommended for price updates)
@@ -57,7 +57,7 @@ Title max length: ~127 characters. The script auto-truncates longer values.
 |------------|-------------|:---:|-------|
 | `category_id` | `category_id` | For category | Direct key |
 | `カテゴリID` | `category_id` | For category | Japanese header |
-| `Mercari category ID` | `category_id` | For category | Baserow convention |
+| `Mercari category ID` | `category_id` | For category | Supabase convention |
 
 Category ID must be a positive integer. Use `mercari-category-id` skill to look up valid category IDs before populating this column.
 

@@ -21,10 +21,9 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Dict, List, Optional, Set, Tuple
 
-import requests
 from PIL import Image, ImageOps
+from supabase_db import SupabaseDB, resolve_credentials
 
-BASEROW_API = "https://api.baserow.io/api"
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 IMAGE_URL_RE = re.compile(r"https?://[^,\s]+")
 EXCLUDE_MAIN_RE = re.compile(r"^Product Images \(exclude main\)(\d+)$")
@@ -74,16 +73,6 @@ def load_dotenv(path: str) -> None:
                 os.environ[key] = value
 
 
-def resolve_baserow_token(cli_token: Optional[str]) -> Optional[str]:
-    if cli_token:
-        return cli_token.strip()
-    for key in ("BASEROW_TOKEN", "RP_BASEROW_TOKEN", "TOKEN"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    return None
-
-
 def normalize_bucket_name(value: str) -> str:
     bucket = value.strip().lower().replace(" ", "-")
     bucket = re.sub(r"[^a-z0-9.-]", "-", bucket)
@@ -127,116 +116,20 @@ def parse_item_codes_arg(path_or_csv: Optional[str]) -> Optional[Set[str]]:
     return {x.strip() for x in path_or_csv.split(",") if x.strip()}
 
 
-# ── Baserow HTTP (requests.Session) ──────────────────────────────────
-
-def _baserow_headers(token: str, content_type: Optional[str] = None) -> dict:
-    h = {"Authorization": f"Token {token}"}
-    if content_type:
-        h["Content-Type"] = content_type
-    return h
-
-
-def fetch_table_rows(session: requests.Session, token: str, table_id: int) -> List[dict]:
+def fetch_rows_for_prepare(db: SupabaseDB, item_codes_filter: Optional[Set[str]]) -> List[dict]:
+    """Fetch product rows from Supabase compat view for image preprocessing."""
     rows: List[dict] = []
-    page = 1
-    while True:
-        url = (
-            f"{BASEROW_API}/database/rows/table/{table_id}/"
-            f"?user_field_names=true&size=200&page={page}"
-        )
-        resp = _get_with_retry(session, url, token)
-        data = resp.json()
-        batch = data.get("results", [])
-        if not batch:
-            break
-        rows.extend(batch)
-        if len(batch) < 200:
-            break
-        page += 1
-    return rows
-
-
-def fetch_rows_by_item_codes(
-    session: requests.Session,
-    token: str,
-    table_id: int,
-    item_code_field: str,
-    item_codes: Set[str],
-) -> List[dict]:
-    rows: List[dict] = []
-    seen_ids: Set[int] = set()
-    for code in sorted(item_codes):
-        page = 1
-        while True:
-            query = urllib.parse.urlencode(
-                {
-                    "user_field_names": "true",
-                    "size": 200,
-                    "page": page,
-                    f"filter__{item_code_field}__equal": code,
-                }
-            )
-            url = f"{BASEROW_API}/database/rows/table/{table_id}/?{query}"
-            resp = _get_with_retry(session, url, token)
-            data = resp.json()
-            batch = data.get("results", [])
-            if not batch:
-                break
-            for row in batch:
-                row_id = row.get("id")
-                if row_id in seen_ids:
-                    continue
-                seen_ids.add(row_id)
-                rows.append(row)
-            if len(batch) < 200:
-                break
-            page += 1
-    return rows
-
-
-def _get_with_retry(session: requests.Session, url: str, token: str, timeout: int = 120) -> requests.Response:
-    last_exc = None
-    for attempt in range(4):
-        try:
-            resp = session.get(url, headers=_baserow_headers(token), timeout=timeout)
-            resp.raise_for_status()
-            return resp
-        except requests.RequestException as exc:
-            last_exc = exc
-            if attempt == 3:
-                raise
-            time.sleep(1.5 * (attempt + 1))
-    raise last_exc  # type: ignore[misc]
-
-
-def patch_rows(session: requests.Session, token: str, table_id: int, items: List[dict]) -> List[dict]:
-    if not items:
+    if item_codes_filter:
+        result = db.fetch_by_item_codes(list(item_codes_filter))
+        rows = list(result.values())
+    else:
+        # Fetch all — paginated via compat view
+        # For full-table scans, fetch in batches by reading all item codes first
+        # This avoids the Baserow full-table-scan pattern
+        sys.stderr.write("WARN: Full-table scan without --item-codes not yet implemented for Supabase.\n")
+        sys.stderr.write("      Use --item-codes to filter.\n")
         return []
-    url = f"{BASEROW_API}/database/rows/table/{table_id}/batch/?user_field_names=true"
-    resp = _post_with_retry(session, url, token, {"items": items})
-    return resp.json().get("items", [])
-
-
-def _post_with_retry(
-    session: requests.Session, url: str, token: str, body: dict, timeout: int = 120
-) -> requests.Response:
-    last_exc = None
-    for attempt in range(4):
-        try:
-            resp = session.post(
-                url,
-                headers=_baserow_headers(token, "application/json"),
-                json=body,
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            return resp
-        except requests.RequestException as exc:
-            last_exc = exc
-            if attempt == 3:
-                raise
-            time.sleep(1.5 * (attempt + 1))
-    raise last_exc  # type: ignore[misc]
+    return rows
 
 
 # ── R2 upload via wrangler ───────────────────────────────────────────
@@ -566,15 +459,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    load_dotenv(os.path.join(SKILL_DIR, ".env"))
-    load_dotenv(os.path.join(SKILL_DIR, ".env.local"))
-
-    token = resolve_baserow_token(args.token)
-    if not token:
+    key = resolve_credentials(args.token)
+    if not key:
         raise SystemExit(
-            "Missing Baserow token. Pass --token or set BASEROW_TOKEN "
-            "(optionally in skill .env/.env.local)."
+            "Missing Supabase key. Pass --token or set SUPABASE_SERVICE_ROLE_KEY."
         )
+
+    db = SupabaseDB()
 
     validate_public_base_url(args.r2_public_base_url)
     bucket = normalize_bucket_name(args.r2_bucket)
@@ -583,20 +474,13 @@ def main() -> None:
 
     ensure_bucket_exists(bucket=bucket, wrangler_config=args.wrangler_config, dry_run=args.dry_run)
 
-    # ── Fetch rows from Baserow ──────────────────────────────────
-    session = requests.Session()
-
-    if item_codes_filter:
-        rows = fetch_rows_by_item_codes(
-            session=session, token=token, table_id=args.table_id,
-            item_code_field=args.item_code_field, item_codes=item_codes_filter,
-        )
-    else:
-        rows = fetch_table_rows(session, args.table_id)
+    # ── Fetch rows from Supabase compat view ──────────────────────
+    rows = fetch_rows_for_prepare(db, item_codes_filter)
 
     # Filter by item codes if provided (belt-and-suspenders)
+    item_code_field = args.item_code_field  # "Item Code" or "item code"
     if item_codes_filter:
-        rows = [r for r in rows if str(r.get(args.item_code_field) or "").strip() in item_codes_filter]
+        rows = [r for r in rows if str(r.get(item_code_field) or "").strip() in item_codes_filter]
 
     # ── Collect all image refs ───────────────────────────────────
     all_refs = collect_all_image_refs(rows, args.item_code_field, args.image_field)
@@ -643,15 +527,13 @@ def main() -> None:
             result = future.result()
             results.append(result)
 
-    # ── Build patches grouped by row ─────────────────────────────
-    row_patches: Dict[int, Dict[str, str]] = {}
-    row_multi_state: Dict[int, Dict[str, List[str]]] = {}
-    row_json_array_state: Dict[int, Dict[str, list]] = {}
-    ref_by_result = {r.slot: r for r in all_refs}  # crude but works for patch building
+    # ── Build patches grouped by item_code ──────────────────────────
+    row_patches: Dict[str, Dict] = {}  # item_code → {field: value, ...}
+    row_json_array_state: Dict[str, Dict[str, list]] = {}
+    ref_by_result = {r.slot: r for r in all_refs}
 
     for result in results:
         item = {
-            "row_id": result.row_id,
             "item_code": result.item_code,
             "slot": result.slot,
             "field_name": result.field_name,
@@ -665,43 +547,45 @@ def main() -> None:
             item["resized_bytes"] = result.resized_bytes
             item["r2_key"] = result.r2_key
 
-            # Build field patch for this row
-            if result.row_id not in row_patches:
-                row_patches[result.row_id] = {}
-            if result.row_id not in row_multi_state:
-                row_multi_state[result.row_id] = {}
-            if result.row_id not in row_json_array_state:
-                row_json_array_state[result.row_id] = {}
+            # Build field patch for this item_code
+            ic = result.item_code
+            if ic not in row_patches:
+                row_patches[ic] = {}
 
-            # Find the matching ref to build the patch
+            # For Supabase, only image_urls_json needs updating
             matching_ref = None
             for ref in all_refs:
                 if ref.row_id == result.row_id and ref.slot == result.slot:
                     matching_ref = ref
                     break
 
-            if matching_ref:
-                patch = build_patch_for_field(
-                    matching_ref, result.new_url,
-                    row_multi_state[result.row_id],
-                    row_json_array_state[result.row_id],
-                )
-                row_patches[result.row_id].update(patch)
+            if matching_ref and matching_ref.source_type == "json_array":
+                if ic not in row_json_array_state:
+                    row_json_array_state[ic] = {}
+                field = "image_urls_json"
+                arr = row_json_array_state[ic].get(field)
+                if arr is None:
+                    arr = list(matching_ref.json_array_urls) if matching_ref.json_array_urls else []
+                    row_json_array_state[ic][field] = arr
+                if matching_ref.multi_index is not None and matching_ref.multi_index < len(arr):
+                    arr[matching_ref.multi_index] = result.new_url
+                row_patches[ic]["image_urls_json"] = arr
 
         report_items.append(item)
 
-    # ── Batch PATCH to Baserow ───────────────────────────────────
-    updates = []
-    for row_id, patch in row_patches.items():
-        patch["id"] = row_id
-        updates.append(patch)
+    # ── Write to Supabase ──────────────────────────────────────────
+    patch_list = []
+    for item_code, patch_data in row_patches.items():
+        p = {"item_code": item_code}
+        p.update(patch_data)
+        patch_list.append(p)
 
     updated_rows = 0
-    if updates and not args.dry_run:
-        for i in range(0, len(updates), 100):
-            batch = updates[i : i + 100]
-            patched = patch_rows(session, token, args.table_id, batch)
-            updated_rows += len(patched)
+    if patch_list and not args.dry_run:
+        # Batch update image_urls_json via SupabaseDB
+        for p in patch_list:
+            if db.update_image_urls_json(p["item_code"], p.get("image_urls_json", [])):
+                updated_rows += 1
 
     scanned = len({r.row_id for r in results if not r.error}) or len(row_patches)
 

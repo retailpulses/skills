@@ -1,11 +1,11 @@
 ---
 name: gigab2b-workflow
-description: GigaB2B API access (HMAC-SHA256 signed) and Baserow sync workflow for product, price, shipping, and saved-products operations. Use for querying GigaB2B data or syncing saved products into Baserow table 886994.
+description: GigaB2B API access (HMAC-SHA256 signed) and Supabase sync workflow for product, price, shipping, and saved-products operations. Use for querying GigaB2B data or syncing saved products into Supabase product_variants + product_commercials.
 ---
 
 # GigaB2B Workflow
 
-Use this skill when you need to query GigaB2B product, price, shipping, or saved-product data, or sync saved products into Baserow table 886994.
+Use this skill when you need to query GigaB2B product, price, shipping, or saved-product data, or sync saved products into Supabase (delegates to `$sync-giga-saved-products` for the Supabase write path).
 
 This skill is self-contained for GigaB2B operations. Do not rely on external repo docs during normal use.
 
@@ -22,7 +22,7 @@ This skill is self-contained for GigaB2B operations. Do not rely on external rep
 - `GIGA_CLIENT_ID` environment variable
 - `GIGA_CLIENT_SECRET` environment variable
 - `GIGA_API_BASE_URL` environment variable (defaults to `https://openapi.gigab2b.com`)
-- Baserow token (set as `BASEROW_TOKEN`)
+- Supabase credentials (set via `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`)
 
 ## Authentication
 
@@ -113,7 +113,7 @@ Use these endpoints for direct data queries.
 
 ## Sync Mode
 
-Use this mode to fetch saved products from GigaB2B and write them to Baserow table 886994.
+Use this mode to fetch saved products from GigaB2B and write them to Supabase (delegates to `$sync-giga-saved-products` for the Supabase write path).
 
 ### Input Modes
 
@@ -125,12 +125,12 @@ If the user does not clearly specify a mode, ask which mode to use.
 ### Workflow
 
 1. Read the user input and normalize the requested mode.
-2. Load the live Baserow schema for table `886994` before writing anything.
+2. Delegate to `$sync-giga-saved-products` for the Supabase write path (product_variants + product_commercials).
 3. Use the GigaB2B saved-products API endpoint (`POST /b2b-overseas-api/v1/buyer/product/skus/v1`) to fetch the requested saved-product set.
 4. Deduplicate the source set by `Item Code`.
-5. Query Baserow `886994` and build the existing `Item Code` set.
-6. Skip any source row whose `Item Code` already exists.
-7. Create new Baserow rows only for new `Item Code` values.
+5. Query Supabase `baserow_886994_compat_vw` and build the existing `item_code` set.
+6. Skip any source row whose `item_code` already exists.
+7. Create new Supabase rows only for new `item_code` values.
 8. Leave unrelated fields unchanged or blank unless the source data provides a safe value.
 9. Verify the write result by re-reading the created rows.
 
@@ -139,7 +139,7 @@ If the user does not clearly specify a mode, ask which mode to use.
 - `Item Code` is the unique key.
 - Never create a duplicate row for an existing `Item Code`.
 - Never update existing rows unless the user explicitly asks for an update workflow.
-- Do not invent source values that are not present in GigaB2B or Baserow.
+- Do not invent source values that are not present in GigaB2B or Supabase.
 - Keep the operation append-only.
 
 ### Default Behavior
@@ -148,9 +148,9 @@ If the user does not clearly specify a mode, ask which mode to use.
 - If the user gives no item codes and no other mode hint, use the last-30-days saved-products sync.
 - If the saved-products retrieval path is unclear from the repo context, stop and confirm before guessing.
 
-### Baserow Access
+### Supabase Access
 
-- Read Baserow rows with the live API and `user_field_names=true`.
+- Read Supabase rows via PostgREST: `GET /rest/v1/baserow_886994_compat_vw`.
 - Target table for this skill: `886994`.
 - Treat `Item Code` as the unique lookup key.
 - For reads, fetch existing rows first and build a set of existing `Item Code` values.

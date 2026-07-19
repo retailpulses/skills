@@ -3,8 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DEFAULT_BASE_URL = "https://api.baserow.io";
-const DEFAULT_TABLE_ID = "886975";
+// TODO(2026-07-18): Migrate from Baserow API to Supabase PostgREST.
+// Update DEFAULT_BASE_URL to SUPABASE_URL + /rest/v1/mercari_inquiries.
+// See docs/BASEROW_TO_SUPABASE_MIGRATION.md for the migration plan.
+const DEFAULT_BASE_URL = "https://api.baserow.io";  // DEPRECATED: migrate to Supabase
+const DEFAULT_TABLE_ID = "886975";  // DEPRECATED: use mercari_inquiries table
 const DEFAULT_ENV_FILE = "/Users/user/Documents/Retailpulses/.env";
 const PAGE_SIZE = 200;
 

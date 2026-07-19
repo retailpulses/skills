@@ -2,37 +2,38 @@
 
 ## Verified workflow
 
-This workflow was validated on 2026-03-28.
+This workflow was validated on 2026-03-28. Updated 2026-07-18 for Supabase migration.
 
 Working sequence:
 
-1. Update Baserow `Amazon listings` inventory from `Products`
+1. Update Supabase `amazon_listings` inventory from `product_variants` (via `baserow_886994_compat_vw`)
 2. Generate a tab-delimited upload file from the official Amazon `PriceAndQuantity.xlsm` template
 3. Upload to Amazon
 4. Read the processing summary
 5. Generate an execution report
 
-## Verified Baserow defaults
+## Verified Supabase defaults
 
-- `Products` table id: `886994`
-- `Amazon listings` table id: `907027`
+- Source: `baserow_886994_compat_vw` (joins `product_variants` + `product_commercials`)
+- Target: `amazon_listings` table
+- Domain: `product_catalog`, owned by `retailpulses/RPagentOS`
 
-## Baserow API access
+## Supabase API access
 
-- Read rows with `Authorization: Token <Baserow database token>`.
-- Use `user_field_names=true` on reads and batch writes.
-- Page through tables with `size=200&page=<n>`.
-- For inventory sync, build the lookup from `Products.item code` and write only `Amazon listings.在庫数 (JP)`.
-- Use batch `PATCH` to `/api/database/rows/table/<table_id>/batch/?user_field_names=true` for inventory updates.
+- Read rows with `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>`.
+- Use PostgREST: `GET /rest/v1/baserow_886994_compat_vw?select=*`.
+- Use Range headers for pagination on large result sets.
+- For inventory sync, build the lookup from `product_variants.item_code` and write `amazon_listings.quantity`.
+- Use batch PATCH via PostgREST for inventory updates.
 
 Field mapping:
 
-- `Products.item code` -> `Amazon listings.Item Code`
-- `Products.Qty Available` -> `Amazon listings.在庫数 (JP)`
+- `product_variants.item_code` -> `amazon_listings.item_code`
+- Computed quantity (Max of Qty Available, Owned Qty, Presale Qty) -> `amazon_listings.quantity`
 
 Unmatched behavior:
 
-- if an `Amazon listings` row does not match a `Products.item code`, write `0` into `在庫数 (JP)`
+- if an `amazon_listings` row does not match a `product_variants.item_code`, write `0` into `quantity`
 
 ## Verified Amazon flat file rule
 

@@ -1,7 +1,7 @@
 interface:
   display_name: "Mercari Add Variant"
-  short_description: "Create multi-variant Mercari listings from Baserow SPU1 groups. Add color/size variants to products."
-  default_prompt: "Use $mercari-add-variant to create a multi-variant Mercari listing from SPU1-grouped products in Baserow."
+  short_description: "Create multi-variant Mercari listings from Supabase SPU1 groups. Add color/size variants to products."
+  default_prompt: "Use $mercari-add-variant to create a multi-variant Mercari listing from SPU1-grouped products in Supabase."
 
 policy:
   allow_implicit_invocation: true

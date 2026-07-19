@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Match Mercari Shops category IDs from product names and write to Baserow.
+"""Match Mercari Shops category IDs from product names and write to Supabase.
 
 Maps 7 Shops-invalid leaf categories to their "その他" (Other) sibling.
 
@@ -12,15 +12,15 @@ import json
 import os
 import re
 import sys
-import time
 from typing import Dict, List, Optional, Tuple
 
-import requests
+from supabase_db import SupabaseDB, resolve_credentials
 
-DEFAULT_TABLE_ID = 886994
+# Baserow row ID no longer used — updates go by item_code
+DEFAULT_TABLE_ID = None  # deprecated, kept for CLI backward compat
 DEFAULT_CATEGORY_MASTER = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "..", "..", "listing-mgmt",
+    "..", "..", "..", "listing-mgmt",
     "apps", "mercari-listing-tool", "public", "data", "category_master.csv",
 )
 
@@ -57,16 +57,6 @@ def load_dotenv(path: str) -> None:
             v = v.strip().strip('"').strip("'")
             if k and k not in os.environ:
                 os.environ[k] = v
-
-
-def resolve_token(cli_token: Optional[str]) -> str:
-    if cli_token:
-        return cli_token.strip()
-    for key in ("BASEROW_TOKEN", "RP_BASEROW_TOKEN", "TOKEN"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    raise SystemExit("Missing Baserow token. Pass --token or set BASEROW_TOKEN.")
 
 
 def parse_item_codes_arg(raw: Optional[str]) -> Optional[List[str]]:
@@ -205,36 +195,20 @@ def match_category(product_name: str, rules: List[Tuple[List[str], str]]) -> Opt
     return None
 
 
-def fetch_products_by_codes(session: requests.Session, token: str, table_id: int, codes: List[str]) -> Dict[str, dict]:
-    result = {}
-    api = "https://api.baserow.io/api"
-    for code in codes:
-        url = f"{api}/database/rows/table/{table_id}/?user_field_names=true&filter__field_7670234__equal={code}"
-        try:
-            resp = session.get(url, headers={"Authorization": f"Token {token}"}, timeout=30)
-            data = resp.json()
-            for r in data.get("results", []):
-                result[code] = r
-        except Exception as exc:
-            print(f"  WARN: failed to fetch {code}: {exc}", file=sys.stderr)
-        time.sleep(0.08)
-    return result
-
-
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="Match Mercari Shops category IDs and write to Baserow")
-    parser.add_argument("--token", default=None)
-    parser.add_argument("--table-id", type=int, default=DEFAULT_TABLE_ID)
+    parser = argparse.ArgumentParser(description="Match Mercari Shops category IDs and write to Supabase")
+    parser.add_argument("--token", default=None, help="Supabase service_role key (or set SUPABASE_SERVICE_ROLE_KEY)")
+    parser.add_argument("--table-id", type=int, default=None, help="Deprecated — ignored, uses Supabase compat view")
     parser.add_argument("--item-codes", required=True, help="Comma-separated list or path to item-code file")
     parser.add_argument("--category-master-path", default=DEFAULT_CATEGORY_MASTER)
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     args = parser.parse_args()
 
-    token = resolve_token(args.token)
-    table_id = args.table_id
-    session = requests.Session()
-    session.headers.update({"Authorization": f"Token {token}", "User-Agent": "Retailpulses-PrepareCategories/1.0"})
+    key = resolve_credentials(args.token)
+    if not key:
+        sys.exit("Missing Supabase key. Pass --token or set SUPABASE_SERVICE_ROLE_KEY.")
+    db = SupabaseDB()
 
     codes = parse_item_codes_arg(args.item_codes)
     if not codes:
@@ -253,8 +227,8 @@ def main() -> None:
     rules = build_category_rules(categories)
     print(f"Built {len(rules)} matching rules", file=sys.stderr)
 
-    print(f"Fetching {len(codes)} products from table {table_id}...", file=sys.stderr)
-    products = fetch_products_by_codes(session, token, table_id, codes)
+    print(f"Fetching {len(codes)} products from Supabase...", file=sys.stderr)
+    products = db.fetch_by_item_codes(codes)
     print(f"Fetched {len(products)} products", file=sys.stderr)
 
     unmatched = []
@@ -273,10 +247,8 @@ def main() -> None:
         if current_cat:
             if current_cat in SHOPS_INVALID_LEAVES:
                 fixed_cid = SHOPS_INVALID_LEAVES[current_cat]
-                pid = prod.get("id")
-                if pid:
-                    patches.append({"id": pid, "Mercari category ID": fixed_cid})
-                    total_fallback += 1
+                patches.append({"item_code": code, "mercari_category_id": fixed_cid})
+                total_fallback += 1
                 total_matched += 1
             else:
                 total_with_existing += 1
@@ -292,10 +264,8 @@ def main() -> None:
         if fallback_cid != cid:
             total_fallback += 1
 
-        pid = prod.get("id")
-        if pid:
-            patches.append({"id": pid, "Mercari category ID": fallback_cid})
-            total_matched += 1
+        patches.append({"item_code": code, "mercari_category_id": fallback_cid})
+        total_matched += 1
 
     print(f"\nResults:", file=sys.stderr)
     print(f"  Already have valid category ID: {total_with_existing}", file=sys.stderr)
@@ -314,7 +284,7 @@ def main() -> None:
     if args.dry_run:
         print(f"\nDRY RUN: would update {len(patches)} rows", file=sys.stderr)
         for p in patches[:5]:
-            print(f"  row {p['id']}: category ID → {p['Mercari category ID']}", file=sys.stderr)
+            print(f"  {p['item_code']}: category ID → {p['mercari_category_id']}", file=sys.stderr)
         if len(patches) > 5:
             print(f"  ... and {len(patches) - 5} more", file=sys.stderr)
         output_summary = {
@@ -330,24 +300,8 @@ def main() -> None:
         print(json.dumps(output_summary, ensure_ascii=False, indent=2))
         return
 
-    api = "https://api.baserow.io/api"
-    batch_url = f"{api}/database/rows/table/{table_id}/batch/?user_field_names=true"
-    updated = 0
-    errors = 0
-
-    for i in range(0, len(patches), 100):
-        batch = patches[i : i + 100]
-        try:
-            resp = session.patch(batch_url, json={"items": batch}, timeout=60)
-            if resp.status_code in (200, 201):
-                updated += len(batch)
-            else:
-                errors += len(batch)
-                print(f"  Batch error at offset {i}: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
-        except Exception as exc:
-            errors += len(batch)
-            print(f"  Batch exception at offset {i}: {exc}", file=sys.stderr)
-        time.sleep(0.3)
+    updated = db.batch_update_variants(patches)
+    errors = len(patches) - updated if updated < len(patches) else 0
 
     output = {
         "dry_run": False,

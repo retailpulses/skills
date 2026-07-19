@@ -13,6 +13,6 @@ The `gigab2b-workflow` skill covers all functionality previously documented here
 - Product detail, price, shipping/tracking, and saved-products queries
 - Credential hygiene and signature formula
 - Endpoint selection with limits and field guidance
-- Query mode and Sync mode (Baserow table 886994)
+- Query mode and Sync mode (Supabase product_variants + product_commercials)
 
 **Next action:** Use `gigab2b-workflow` instead.
