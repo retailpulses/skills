@@ -9,7 +9,24 @@ Turn previously answered Mercari Shops inquiries into careful, context-aware fol
 
 ## Data Source
 
-Supabase `mercari_inquiries` table. Domain: `product_catalog`, owned by `retailpulses/RPagentOS`. Replaces Baserow table 886975.
+Supabase `inquiries` table. Domain: `inquiry_management`, owned by `retailpulses/inquiry-automation`.
+Canonical schema defined in `supabase/migrations/20260721000000_create_inquiry_management_core.sql`.
+Replaces the legacy `mercari_inquiries` table (formerly Baserow table 886975).
+
+### Key canonical columns
+
+| Purpose | Column |
+|---|---|
+| Follow-up eligibility | `follow_up_status` (values: `open`, `followed_up`, `do_not_follow_up`) |
+| Workflow lifecycle | `status` (values: `received`, `followed_up`, `answered`, `closed_won`, `closed_lose`) |
+| Inquiry date | `inquiry_date` (TIMESTAMPTZ) |
+| Shop | `shop_key` (values: `shop1`, `shop2`, `shop3`, `shop4`) |
+| Customer | `customer_nickname` |
+| Follow-up sent timestamp | `follow_up_sent_at` (TIMESTAMPTZ) |
+| Inquiry message body | `inquiry_body` |
+| Last customer message | `last_custom_message` |
+| Notes | `notes` |
+| Soft delete | `deleted_at` (TIMESTAMPTZ — NULL = active) |
 
 ## Operating policy
 
@@ -23,7 +40,9 @@ Supabase `mercari_inquiries` table. Domain: `product_catalog`, owned by `retailp
 
 ## Requirements
 
-- Use `scripts/supabase_inquiries.mjs` for all inquiry queries, reads, status writes, and status verification against Supabase `mercari_inquiries` table.
+- Use `scripts/supabase_inquiries.mjs` for all inquiry queries, reads, status writes, and status verification against Supabase `inquiries` table.
+- `follow_up_status` is the primary column for follow-up operations. Query with `--status open` to find follow-up-eligible inquiries. After sending, set `follow_up_status=followed_up` AND `status=followed_up`.
+- Respect kill switches: `INQUIRY_FOLLOWUP_DB_WRITES_ENABLED` (false = skip all DB writes) and `INQUIRY_EXTERNAL_SEND_ENABLED` (false = skip sending to customers). These are independent — you can disable sends while still recording intent, or disable all writes.
 - Use the user's existing logged-in Chrome or Edge profile only for Mercari operations that have no available script or API alternative. Shop authentication and profile state matter.
 - Expect Mercari Shops seller pages at `https://mercari-shops.com/seller/shops/...`. The Inquiry Portal is an emergency fallback only when direct Supabase access is unavailable and the script failure cannot be repaired during the run.
 - Do not expose customer names, shop IDs, conversation IDs, order IDs, or product codes in reports or reusable files.
@@ -34,4 +53,6 @@ Supabase `mercari_inquiries` table. Domain: `product_catalog`, owned by `retailp
 
 - `SUPABASE_URL` — Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY` — service_role key for reads/writes
+- `INQUIRY_FOLLOWUP_DB_WRITES_ENABLED` — set to `false` to disable database writes (reads still work)
+- `INQUIRY_EXTERNAL_SEND_ENABLED` — set to `false` to disable external customer messaging
 - `BASEROW_TOKEN` (legacy) — no longer used

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** Build audit input from answered inquiry snapshot via Supabase PostgREST.
 
-Replaces Baserow API with Supabase PostgREST.
-Target: mercari_inquiries table (domain: product_catalog, owner: retailpulses/RPagentOS).
+Target: inquiries table (domain: inquiry_management, owner: retailpulses/inquiry-automation).
+Canonical schema defined in supabase/migrations/20260721000000_create_inquiry_management_core.sql.
 */
 
 import fs from "node:fs";
@@ -41,12 +41,12 @@ const supabaseUrl = (process.env.SUPABASE_URL || fileEnv.SUPABASE_URL || "").rep
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || fileEnv.SUPABASE_SERVICE_ROLE_KEY || "";
 if (!supabaseUrl || !supabaseKey) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 
-const TABLE = "mercari_inquiries";
+const TABLE = "inquiries";
 const BASE = `${supabaseUrl}/rest/v1`;
 
 const statusById = new Map();
 for (const id of ids) {
-  const response = await fetch(`${BASE}/${TABLE}?id=eq.${id}&limit=1`, {
+  const response = await fetch(`${BASE}/${TABLE}?id=eq.${id}&limit=1&select=id,follow_up_status,status`, {
     headers: {
       apikey: supabaseKey,
       Authorization: `Bearer ${supabaseKey}`,
@@ -56,7 +56,10 @@ for (const id of ids) {
   if (!response.ok) throw new Error(`Row ${id} query failed: ${response.status}`);
   const data = await response.json();
   const row = Array.isArray(data) ? data[0] : data;
-  statusById.set(id, row?.status || "Unknown");
+  statusById.set(id, {
+    follow_up_status: row?.follow_up_status || "Unknown",
+    status: row?.status || "Unknown",
+  });
 }
 
 const snapshotById = new Map(snapshotRows.map((item) => [item.id, item]));
@@ -123,7 +126,13 @@ const cases = ids
     const item = snapshotById.get(id);
     if (!item) throw new Error(`Case ${id} is missing from snapshot`);
     const rule = { ...groupedRule(id), ...(overrides[String(id)] || {}) };
-    const status = statusById.get(id) || "Not found";
+    const dbStatus = statusById.get(id) || { status: "Not found", follow_up_status: "Not found" };
+    // For terminal workflow states, verify against inquiries.status;
+    // for follow-up lifecycle states, verify against follow_up_status.
+    const expected = rule.expectedStatus;
+    const actualForComparison = (["closed_lose", "closed_won"].includes(expected))
+      ? dbStatus.status
+      : dbStatus.follow_up_status;
     return {
       inquiryDate: new Intl.DateTimeFormat("en-CA", {
         timeZone: "Asia/Tokyo",
@@ -135,8 +144,8 @@ const cases = ids
       chronologyGate: rule.chronologyGate || "reviewed",
       action: rule.action || "not-recorded",
       disclaimerVerified: Boolean(rule.disclaimerVerified),
-      statusVerified: status === rule.expectedStatus,
-      note: rule.note || status,
+      statusVerified: actualForComparison === expected,
+      note: rule.note || dbStatus.follow_up_status || dbStatus.status || "Not found",
     };
   })
   .sort((a, b) => a.inquiryDate.localeCompare(b.inquiryDate) || a.shop.localeCompare(b.shop));
