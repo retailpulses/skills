@@ -21,7 +21,7 @@ const rows = data.cases.map((item, index) => ({
   gate: item.chronologyGate || "unknown",
   action: item.action || "not-recorded",
   disclaimer: item.disclaimerVerified ? "yes" : "no",
-  baserow: (item.baserowStatusVerified ?? item.portalStatusVerified) ? "yes" : "no",
+  supabase: item.statusVerified ? "yes" : "no",
   note: String(item.note || "").replace(/\|/g, "\\|"),
 }));
 
@@ -35,24 +35,25 @@ const lines = [
   `- Follow-ups sent: ${count((row) => row.action.startsWith("sent"))}`,
   `- Corrective replies sent: ${count((row) => row.action === "corrective-reply")}`,
   `- Skipped without a new message or closed: ${count((row) => ["skipped", "closed-lose"].includes(row.action))}`,
-  `- Baserow statuses verified: ${count((row) => row.baserow === "yes")}`,
+  `- Supabase statuses verified: ${count((row) => row.supabase === "yes")}`,
   "",
   "The report intentionally omits customer names, shop IDs, conversation IDs, order IDs, and product codes.",
   "",
-  "| Case | Inquiry date | Shop | Chronology gate | Action | Disclaimer verified | Baserow verified | Note |",
+  "| Case | Inquiry date | Shop | Chronology gate | Action | Disclaimer verified | Supabase verified | Note |",
   "|---|---|---|---|---|---:|---:|---|",
   ...rows.map(
     (row) =>
-      `| ${row.caseRef} | ${row.date} | ${row.shop} | ${row.gate} | ${row.action} | ${row.disclaimer} | ${row.baserow} | ${row.note} |`,
+      `| ${row.caseRef} | ${row.date} | ${row.shop} | ${row.gate} | ${row.action} | ${row.disclaimer} | ${row.supabase} | ${row.note} |`,
   ),
   "",
   "## Completion controls",
   "",
   `- Every sent message visibly verified: ${data.allSentMessagesVerified ? "yes" : "no"}`,
-  `- Every terminal Baserow state verified: ${(data.allBaserowStatesVerified ?? data.allPortalStatesVerified) ? "yes" : "no"}`,
+  `- Every terminal Supabase state verified: ${data.allStatusesVerified ? "yes" : "no"}`,
   `- Job-related browser windows closed: ${data.jobWindowsClosed ? "yes" : "no"}`,
   "",
 ];
 
-fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-fs.writeFileSync(outputPath, lines.join("\n"), "utf8");
+fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
+fs.writeFileSync(outputPath, lines.join("\n"), { encoding: "utf8", mode: 0o600 });
+fs.chmodSync(outputPath, 0o600);

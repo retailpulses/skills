@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0 - 2026-07-22
+
+- Replaced the active inquiry datastore client with canonical Supabase PostgREST access to `public.inquiries` and `public.inquiry_product_links`.
+- Restricted the default work queue to active inquiries whose workflow state is `answered` and follow-up state is `open`.
+- Added fail-closed database-write and external-send controls, visible-send confirmation proof, and conditional zero-row-checked status transitions.
+- Added exact JST-to-UTC query boundaries, deterministic keyset pagination, private-mode output files, batched audit state reads, and black-box local HTTP tests.
+- Preserved the semantic answer-completeness gate, correct-shop verification, send verification, and anonymized completion report.
+- Related to retailpulses/inquiry-automation#35.
+
 ## 1.2.0 - 2026-06-20
 
 - Added `baserow_inquiries.mjs` for direct Baserow schema discovery, default JST-window queries, targeted record reads, batch status writes, follow-up date writes, and post-write verification.
